@@ -23,6 +23,10 @@ services:
       MISONOS_PODCAST_URL: "http://127.0.0.1:4323"
       MISONOS_TUNEIN_URL: "http://127.0.0.1:4324"
       MISONOS_NAVIDROME_URL: "http://127.0.0.1:4325"
+      MISONOS_SPOTIFY_URL: "http://127.0.0.1:4326"
+      # Optional: which Spotify account linked in the Sonos app plays Spotify items.
+      # Unset, it's read off your Sonos Favorites (and can be picked in Settings).
+      MISONOS_SPOTIFY_SN: "${MISONOS_SPOTIFY_SN:-}"
       # Writable SQLite store (preferences, recently-viewed, EQ presets). WAL
       # sidecars (misonos.db-wal/-shm) live alongside it in ./data.
       MISONOS_BRIDGE_DB: "/data/misonos.db"
@@ -115,6 +119,25 @@ services:
       MISONOS_NAVIDROME_LOGIN_PATH: "/data/navidrome-login.json"
       # Speakers load cover art from this service directly, so advertise the LAN IP.
       MISONOS_NAVIDROME_PUBLIC_URL: "http://${MISONOS_LAN_IP}:4325"
+    volumes:
+      - ./data:/data
+
+  spotify:
+    image: misonos-node
+    command: node apps/spotify-smapi/dist/index.js
+    network_mode: host
+    restart: unless-stopped
+    depends_on: [bridge]
+    environment:
+      MISONOS_SPOTIFY_PORT: "4326"
+      # Optional: the Client ID of your app on developer.spotify.com. The source stays
+      # hidden until it's set; then connect your account under Settings -> Spotify.
+      MISONOS_SPOTIFY_CLIENT_ID: "${MISONOS_SPOTIFY_CLIENT_ID:-}"
+      # Optional: pin the OAuth redirect URI (it must be listed on the Spotify app).
+      # Unset, the web app sends <the address you opened it on>/api/sources/spotify/auth/callback.
+      MISONOS_SPOTIFY_REDIRECT_URI: "${MISONOS_SPOTIFY_REDIRECT_URI:-}"
+      # The Spotify refresh token persists here across restarts.
+      MISONOS_SPOTIFY_TOKEN_PATH: "/data/spotify-token.json"
     volumes:
       - ./data:/data
 

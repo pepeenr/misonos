@@ -3,8 +3,31 @@ import { loadConfig, type BridgeConfig } from "./config.js";
 import { discoverSsdp } from "./ssdp.js";
 import { callSoap, SonosSoapError, type ServiceType } from "./sonosSoap.js";
 import { fetchDeviceInfo } from "./deviceInfo.js";
-import type { PlaybackMode, SonosDeviceInfo, SourceBrowseResponse, SourceDescriptor, SourceTrackInfo } from "@misonos/sonos-protocol";
-import { browseSource, fetchTrack, listSources, searchSource, sourceAuthClearCookies, sourceAuthSetCookies, sourceAuthStatus, sourcePin, sourceSubscriptions } from "./sources.js";
+import type { PlaybackMode, SonosDeviceInfo, SourceBrowseResponse, SourceDescriptor, SourceTrackInfo, SpotifyAccountsView } from "@misonos/sonos-protocol";
+import {
+  browseSource,
+  fetchTrack,
+  listSources,
+  searchSource,
+  sourceAuthCallback,
+  sourceAuthClearCookies,
+  sourceAuthLogin,
+  sourceAuthLogout,
+  sourceAuthSetCookies,
+  sourceAuthStatus,
+  sourcePin,
+  sourceSubscriptions
+} from "./sources.js";
+import {
+  defaultSpotifyToken,
+  isSpotifyUri,
+  mergeSpotifyAccounts,
+  spotifyAccountsInDidl,
+  spotifyQueueItem,
+  spotifyTrackFromSonosUri,
+  SPOTIFY_SOURCE_ID,
+  type SonosSpotifyAccount
+} from "./spotifySonos.js";
 import {
   buildServiceUri,
   detectLanIp,
@@ -72,6 +95,11 @@ export interface SmapiAccountScanResult {
 }
 
 const SMAPI_MISS_COOLDOWN_MS = 5 * 60 * 1000;
+// Queueing a whole Spotify playlist makes the speaker resolve it before answering.
+const ENQUEUE_TIMEOUT_MS = 20000;
+// Favorites and queues rarely change which Spotify accounts they use.
+const SPOTIFY_ACCOUNTS_TTL_MS = 5 * 60 * 1000;
+
 
 export class SonosService {
   private zones = new Map<string, SonosZone>();
@@ -96,6 +124,9 @@ export class SonosService {
     items: { sourceId: string; trackId: string; title: string; artist: string | null; album: string | null }[];
     startTrack: number | null;
   }) => void | Promise<void>;
+  // The Sonos Spotify account picked in Settings ({ sid, sn, token }), if any.
+  readSpotifyAccountChoice?: () => Promise<unknown>;
+  private spotifyAccountCache: { accounts: SonosSpotifyAccount[]; expires: number } | undefined;
 
   constructor(private readonly config: BridgeConfig = loadConfig()) {}
 
@@ -640,6 +671,87 @@ export class SonosService {
     return sourceSubscriptions(sourceId);
   }
 
+  sourceAuthLogin(sourceId: string, redirectUri: string): Promise<{ url: string }> {
+    return sourceAuthLogin(sourceId, redirectUri);
+  }
+
+  sourceAuthCallback(sourceId: string, query: URLSearchParams): Promise<unknown> {
+    return sourceAuthCallback(sourceId, query);
+  }
+
+  sourceAuthLogout(sourceId: string): Promise<unknown> {
+    return sourceAuthLogout(sourceId);
+  }
+
+  // The Spotify accounts linked on this Sonos system, read off the Spotify items in
+  // Sonos Favorites and the current queues, most used first.
+  async spotifyAccounts(refresh = false): Promise<SonosSpotifyAccount[]> {
+    const cached = this.spotifyAccountCache;
+    if (!refresh && cached && cached.expires > Date.now()) return cached.accounts;
+    const seed = await this.firstVisibleZone();
+    const coordinators = [...this.groups.values()]
+      .map((group) => this.zones.get(group.coordinatorId))
+      .filter((zone): zone is SonosZone => !!zone);
+    const listings = await Promise.all([
+      { ip: seed.ipAddress, objectId: "FV:2" },
+      ...coordinators.map((zone) => ({ ip: zone.ipAddress, objectId: "Q:0" }))
+    ].map(async ({ ip, objectId }) => {
+      try {
+        const response = await callSoap(ip, "ContentDirectory", "Browse", {
+          ObjectID: objectId,
+          BrowseFlag: "BrowseDirectChildren",
+          Filter: "*",
+          StartingIndex: 0,
+          RequestedCount: 200,
+          SortCriteria: ""
+        });
+        return spotifyAccountsInDidl(response.Result);
+      } catch {
+        return [];
+      }
+    }));
+    const accounts = mergeSpotifyAccounts(listings);
+    this.spotifyAccountCache = { accounts, expires: Date.now() + SPOTIFY_ACCOUNTS_TTL_MS };
+    return accounts;
+  }
+
+  async spotifyAccountsView(refresh = false): Promise<SpotifyAccountsView> {
+    const accounts = await this.spotifyAccounts(refresh).catch(() => []);
+    const selected = await this.selectSpotifyAccount(accounts);
+    return { accounts, selected };
+  }
+
+  // MISONOS_SPOTIFY_SN wins, then the account picked in Settings, then the one most
+  // Spotify favorites use.
+  private async selectSpotifyAccount(accounts: SonosSpotifyAccount[]): Promise<SpotifyAccountsView["selected"]> {
+    const envSn = Number.parseInt(process.env.MISONOS_SPOTIFY_SN ?? "", 10);
+    if (Number.isInteger(envSn)) {
+      const envSid = Number.parseInt(process.env.MISONOS_SPOTIFY_SID ?? "", 10);
+      const found = accounts.find((account) => account.sn === envSn && (!Number.isInteger(envSid) || account.sid === envSid));
+      const sid = Number.isInteger(envSid) ? envSid : found?.sid ?? 9;
+      const token = process.env.MISONOS_SPOTIFY_ACCOUNT_TOKEN || found?.token || defaultSpotifyToken(sid);
+      return { sid, sn: envSn, token, origin: "env" };
+    }
+    const choice = await this.readSpotifyAccountChoice?.().catch(() => undefined);
+    if (isSpotifyAccountChoice(choice)) {
+      // The stored token keeps a choice usable after its favorites are gone.
+      const found = accounts.find((account) => account.sid === choice.sid && account.sn === choice.sn);
+      return { sid: choice.sid, sn: choice.sn, token: found?.token ?? choice.token ?? defaultSpotifyToken(choice.sid), origin: "preference" };
+    }
+    const best = accounts[0];
+    return best ? { sid: best.sid, sn: best.sn, token: best.token, origin: "auto" } : undefined;
+  }
+
+  private async spotifyPlaybackAccount(): Promise<Pick<SonosSpotifyAccount, "sid" | "sn" | "token">> {
+    const account = await this.selectSpotifyAccount(await this.spotifyAccounts().catch(() => []));
+    if (!account) {
+      throw new Error(
+        "MiSonos can't tell which Spotify account Sonos should play with. In the Sonos app, add any Spotify song to Sonos Favorites, or set MISONOS_SPOTIFY_SN."
+      );
+    }
+    return account;
+  }
+
   sourcePin(sourceId: string, id: string, pinned: boolean): Promise<unknown> {
     return sourcePin(sourceId, id, pinned);
   }
@@ -773,10 +885,18 @@ export class SonosService {
     if (refs.length === 0) throw new Error("trackIds must be non-empty");
     const group = await this.requireGroup(groupId);
     const coordinator = await this.requireZone(group.coordinatorId);
-    const tracks = await Promise.all(refs.map((ref) => fetchTrack(ref.sourceId, ref.trackId)));
+    const tracks = await Promise.all(refs.map((ref) => fetchTrack(ref.sourceId, ref.trackId).catch((error: unknown): SourceTrackInfo => {
+      // A Spotify URI plays through Sonos's own Spotify link, so it still plays when the
+      // source can't describe it (signed out, Web API down): Sonos fills in the metadata.
+      if (ref.sourceId === SPOTIFY_SOURCE_ID && isSpotifyUri(ref.trackId)) {
+        return { id: ref.trackId, title: "", url: ref.trackId };
+      }
+      throw error;
+    })));
     tracks.forEach((track, index) => {
-      this.smapiTrackMeta.set(`${refs[index].sourceId}\n${refs[index].trackId}`, track);
+      if (track.title) this.smapiTrackMeta.set(`${refs[index].sourceId}\n${refs[index].trackId}`, track);
     });
+    const spotify = tracks.some((track) => isSpotifyUri(track.url)) ? await this.spotifyPlaybackAccount() : undefined;
     const bridgeHost = this.publicHost();
     if (!bridgeHost) throw new Error("Could not determine bridge LAN IP for stream proxy");
     // S1 firmware drops DIDL metadata on plain-http audio/mp4 URIs, so SMAPI
@@ -788,6 +908,7 @@ export class SonosService {
     // source: full metadata in Now Playing, and no registration required.
     const coordinatorIsS2 = coordinator.swGen === 2;
     const queueItems = tracks.map((track, index) => {
+      if (spotify && isSpotifyUri(track.url)) return spotifyQueueItem(track, spotify);
       const ref = refs[index];
       const ext = extensionForMime(track.mimeType);
       const titleSlug = urlSafeSlug(track.title);
@@ -823,7 +944,7 @@ export class SonosService {
           EnqueuedURIMetaData: item.metadata,
           DesiredFirstTrackNumberEnqueued: 0,
           EnqueueAsNext: 0
-        });
+        }, ENQUEUE_TIMEOUT_MS);
       }
       await callSoap(coordinator.ipAddress, "AVTransport", "SetAVTransportURI", {
         InstanceID: 0,
@@ -841,18 +962,19 @@ export class SonosService {
       // the current track number and insert explicitly at currentTrack+1.
       const position = await callSoap(coordinator.ipAddress, "AVTransport", "GetPositionInfo", { InstanceID: 0 });
       const currentTrack = Number.parseInt(position.Track ?? "0", 10);
-      const insertAt = Number.isFinite(currentTrack) && currentTrack > 0 ? currentTrack + 1 : 1;
+      let insertAt = Number.isFinite(currentTrack) && currentTrack > 0 ? currentTrack + 1 : 1;
       // Walk in order; each successive insert goes right after the previous one
       // so the selected set lands contiguous after the currently playing track.
-      for (let index = 0; index < queueItems.length; index++) {
-        const item = queueItems[index];
-        await callSoap(coordinator.ipAddress, "AVTransport", "AddURIToQueue", {
+      for (const item of queueItems) {
+        const added = await callSoap(coordinator.ipAddress, "AVTransport", "AddURIToQueue", {
           InstanceID: 0,
           EnqueuedURI: item.uri,
           EnqueuedURIMetaData: item.metadata,
-          DesiredFirstTrackNumberEnqueued: insertAt + index,
+          DesiredFirstTrackNumberEnqueued: insertAt,
           EnqueueAsNext: 1
-        });
+        }, ENQUEUE_TIMEOUT_MS);
+        // A container (a whole Spotify album or playlist) adds all its tracks at once.
+        insertAt += Math.max(1, Number.parseInt(added.NumTracksAdded ?? "1", 10) || 1);
       }
     } else {
       for (const item of queueItems) {
@@ -862,7 +984,7 @@ export class SonosService {
           EnqueuedURIMetaData: item.metadata,
           DesiredFirstTrackNumberEnqueued: 0,
           EnqueueAsNext: 0
-        });
+        }, ENQUEUE_TIMEOUT_MS);
       }
     }
 
@@ -915,11 +1037,13 @@ export class SonosService {
     }
   }
 
-  /** Recover {sourceId, trackId} from a queue item URI (SMAPI x-sonos-http or our stream-proxy URL). */
+  /** Recover {sourceId, trackId} from a queue item URI (SMAPI x-sonos-http, Sonos Spotify or our stream-proxy URL). */
   private queueUriToRef(uri: string | undefined): { sourceId: string; trackId: string } | undefined {
     if (!uri) return undefined;
     const smapi = parseSmapiUri(uri);
     if (smapi) return smapi;
+    const spotifyTrack = spotifyTrackFromSonosUri(uri);
+    if (spotifyTrack) return { sourceId: SPOTIFY_SOURCE_ID, trackId: spotifyTrack };
     let pathname = uri;
     if (/^https?:\/\//i.test(uri)) {
       try {
@@ -1437,6 +1561,12 @@ const SMAPI_SOURCE_INFO: Record<string, SmapiSourceInfo> = {
     descMode: "anonymous"
   }
 };
+
+function isSpotifyAccountChoice(value: unknown): value is { sid: number; sn: number; token?: string } {
+  if (!value || typeof value !== "object") return false;
+  const choice = value as { sid?: unknown; sn?: unknown; token?: unknown };
+  return Number.isInteger(choice.sid) && Number.isInteger(choice.sn) && (choice.token === undefined || typeof choice.token === "string");
+}
 
 function parseSmapiUri(uri: string | undefined): { sourceId: string; trackId: string } | undefined {
   if (!uri) return undefined;

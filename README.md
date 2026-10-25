@@ -65,6 +65,8 @@ exposing a music source to your speakers:
 - `apps/tunein-smapi`: internet radio via the [TuneIn](https://tunein.com/radio/home/) directory. (port 4324)
 - `apps/navidrome-smapi`: your own library on [Navidrome](https://www.navidrome.org) or any
   Subsonic-compatible server; Opus and other non-Sonos formats are transcoded on the fly. (port 4325)
+- `apps/spotify-smapi`: your Spotify library (playlists, Liked Songs, albums, artists, search) via the
+  Spotify Web API, played by the Spotify account linked in the Sonos app. (port 4326)
 
 The web app talks to the bridge through a typed HTTP/SSE API. That boundary keeps the UI decoupled from the transport, so a native LAN transport could replace the local Node bridge without changing the web app.
 

@@ -53,7 +53,8 @@ describe("source toggles", () => {
 
   it("knows only the configured source ids", () => {
     expect(isKnownSource("navidrome")).toBe(true);
-    expect(isKnownSource("spotify")).toBe(false);
+    expect(isKnownSource("spotify")).toBe(true);
+    expect(isKnownSource("tidal")).toBe(false);
   });
 
   it("leaves disabled sources out of the list without probing them", async () => {
@@ -61,14 +62,14 @@ describe("source toggles", () => {
     const sources = await listSources(new Set(["grateful-dead-archive", "phish-in"]));
     expect(probed).not.toContain("4319");
     expect(probed).not.toContain("4320");
-    expect(sources.map((source) => source.name)).toEqual(["Source 4321", "Source 4322", "Source 4323", "Source 4324"]);
+    expect(sources.map((source) => source.name)).toEqual(["Source 4321", "Source 4322", "Source 4323", "Source 4324", "Source 4326"]);
   });
 
   it("lists every source in settings, with a fallback name when it isn't answering", async () => {
     stubSources();
     const settings = await listSourceSettings(new Set(["phish-in"]));
     expect(settings.map((source) => source.id)).toEqual([
-      "grateful-dead-archive", "phish-in", "youtube-music", "live-music-archive", "podcasts", "tunein", "navidrome"
+      "grateful-dead-archive", "phish-in", "youtube-music", "live-music-archive", "podcasts", "tunein", "navidrome", "spotify"
     ]);
     expect(settings.find((source) => source.id === "phish-in")).toMatchObject({ enabled: false, available: true, name: "Source 4320" });
     expect(settings.find((source) => source.id === "navidrome")).toEqual({ id: "navidrome", name: "Navidrome", enabled: true, available: false });

@@ -9,8 +9,10 @@ import { proxyStream } from "./streamProxy.js";
 import { subscribeMeter } from "./meter.js";
 import { serveArt } from "./artProxy.js";
 import { deleteSourceIcon, listSourceIcons, saveSourceIcon, serveSourceIcon } from "./sourceIcons.js";
-import { isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled, sourceClearConfig, sourceConfig, sourceSaveConfig } from "./sources.js";
+import { isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled, sourceClearConfig, sourceConfig, sourceSaveConfig, SourceRequestError } from "./sources.js";
 import path from "node:path";
+
+const SPOTIFY_ACCOUNT_PREF = "spotifySonosAccount";
 
 type RouteHandler = (
   request: IncomingMessage,
@@ -73,6 +75,9 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       console.warn(`[bridge] recordRecentlyPlayed failed: ${errorMessage(error)}`);
     }
   };
+
+  // Which Sonos Spotify account Spotify items play with, when picked in Settings.
+  service.readSpotifyAccountChoice = async () => (await store.getPreference(SPOTIFY_ACCOUNT_PREF))?.value;
 
   service.onSnapshot = (snapshot) => {
     void ensureSonosSubscriptions(snapshot);
@@ -415,6 +420,38 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     const sourceAuthCookiesClearMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/auth\/cookies\/clear$/);
     if (request.method === "POST" && sourceAuthCookiesClearMatch) {
       return json(response, await service.sourceAuthClearCookies(decodeURIComponent(sourceAuthCookiesClearMatch[1])));
+    }
+
+    // OAuth sign-in (Spotify). The browser navigates here, so these answer with
+    // redirects and, on failure, a small page instead of JSON.
+    const sourceAuthLoginMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/auth\/login$/);
+    if (request.method === "GET" && sourceAuthLoginMatch) {
+      const redirectUri = url.searchParams.get("redirect_uri") ?? "";
+      try {
+        const login = await service.sourceAuthLogin(decodeURIComponent(sourceAuthLoginMatch[1]), redirectUri);
+        return redirect(response, login.url);
+      } catch (error) {
+        return authPage(response, "Couldn't start the sign-in", sourceErrorMessage(error));
+      }
+    }
+
+    const sourceAuthCallbackMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/auth\/callback$/);
+    if (request.method === "GET" && sourceAuthCallbackMatch) {
+      try {
+        await service.sourceAuthCallback(decodeURIComponent(sourceAuthCallbackMatch[1]), url.searchParams);
+        return redirect(response, "/");
+      } catch (error) {
+        return authPage(response, "Sign-in failed", sourceErrorMessage(error));
+      }
+    }
+
+    const sourceAuthLogoutMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/auth\/logout$/);
+    if (request.method === "POST" && sourceAuthLogoutMatch) {
+      return json(response, await service.sourceAuthLogout(decodeURIComponent(sourceAuthLogoutMatch[1])));
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/spotify/accounts") {
+      return json(response, await service.spotifyAccountsView(url.searchParams.get("refresh") === "1"));
     }
 
     const sourceSubsMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/subscriptions$/);
@@ -778,6 +815,29 @@ function json(response: ServerResponse, body: unknown, status = 200): void {
     "Content-Type": "application/json; charset=utf-8"
   });
   response.end(JSON.stringify(body));
+}
+
+function redirect(response: ServerResponse, location: string): void {
+  response.writeHead(302, { Location: location, "Cache-Control": "no-store" });
+  response.end();
+}
+
+// A minimal page for the sign-in redirects, which a person sees in the browser.
+function authPage(response: ServerResponse, title: string, message: string): void {
+  const body = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head>` +
+    `<body style="font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5">` +
+    `<h1 style="font-size: 1.25rem">${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="/">Back to MiSonos</a></p></body></html>`;
+  response.writeHead(400, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+  response.end(body);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
+
+function sourceErrorMessage(error: unknown): string {
+  if (error instanceof SourceRequestError && error.detail) return error.detail;
+  return errorMessage(error);
 }
 
 function empty(response: ServerResponse, status = 204): void {

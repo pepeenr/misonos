@@ -255,6 +255,10 @@ export interface SourceBrowseItem {
   // source — never inferred from a missing duration, which normal tracks and
   // podcast episodes can also omit.
   isLive?: boolean;
+  // A playable id that plays this album/container whole in one queue call (a
+  // Spotify album or playlist, which Sonos expands itself). When set, Play on the row
+  // sends this id instead of expanding the container's children.
+  playId?: string;
 }
 
 export type PlaybackMode = "replace" | "next" | "end";
@@ -264,6 +268,33 @@ export interface SourceBrowseResponse {
   items: SourceBrowseItem[];
   total: number;
   title?: string;
+}
+
+// A Spotify account linked in the Sonos app, as read off Spotify items in Sonos
+// Favorites and queues. Spotify source items play through it.
+export interface SonosSpotifyAccount {
+  sid: number;
+  sn: number;
+  // The cdudn desc Sonos pairs with the account, e.g. "SA_RINCON2311_X_#Svc2311-…-Token".
+  token: string;
+  // Titles of items it was found on, to tell several linked accounts apart.
+  seenOn: string[];
+  uses: number;
+}
+
+export type SpotifyAccountOrigin = "env" | "preference" | "auto";
+
+export interface SpotifyAccountsView {
+  accounts: SonosSpotifyAccount[];
+  selected?: { sid: number; sn: number; token: string; origin: SpotifyAccountOrigin };
+}
+
+export interface SpotifyAuthStatus {
+  configured: boolean;
+  signedIn: boolean;
+  user?: { id: string; displayName?: string };
+  // Set when MISONOS_SPOTIFY_REDIRECT_URI pins the redirect URI.
+  redirectUri?: string | null;
 }
 
 export interface SourceTrackInfo {

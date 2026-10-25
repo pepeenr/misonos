@@ -1,4 +1,4 @@
-import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, TransportAction, VolumePayload, VolumeState } from "@misonos/sonos-protocol";
+import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, TransportAction, VolumePayload, VolumeState } from "@misonos/sonos-protocol";
 import { apiUrl } from "./servers.js";
 
 export interface AddPlaylistItemInput {
@@ -171,6 +171,9 @@ export const bridgeApi = {
     request<{ cookieAuth: "signed-in" | "signed-out" }>(`/api/sources/${encodeURIComponent(sourceId)}/auth/cookies`, { method: "POST", body: JSON.stringify({ paste }) }),
   sourceAuthClearCookies: (sourceId: string) =>
     request<{ cookieAuth: "signed-out" }>(`/api/sources/${encodeURIComponent(sourceId)}/auth/cookies/clear`, { method: "POST", body: "{}" }),
+  spotifyAuthStatus: () => request<SpotifyAuthStatus>("/api/sources/spotify/auth/status"),
+  spotifyLogout: () => request<{ signedIn: false }>("/api/sources/spotify/auth/logout", { method: "POST", body: "{}" }),
+  spotifyAccounts: (refresh = false) => request<SpotifyAccountsView>(`/api/spotify/accounts${refresh ? "?refresh=1" : ""}`),
   sourceSubscriptions: (sourceId: string) =>
     request<{ ids: string[] }>(`/api/sources/${encodeURIComponent(sourceId)}/subscriptions`),
   pinSource: (sourceId: string, id: string, pinned: boolean) =>
