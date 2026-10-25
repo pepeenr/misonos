@@ -1,7 +1,10 @@
 import type { SpotifyAuth } from "./auth.js";
 
 const API_BASE = "https://api.spotify.com/v1";
-const REQUEST_TIMEOUT_MS = 10000;
+// A healthy call answers in well under a second, but now and then one hangs or gets a
+// 5xx (seen after a few idle minutes). Give up on an attempt early and try once more,
+// keeping both under the bridge's 8 s wait for a track.
+const ATTEMPT_TIMEOUTS_MS = [3000, 4500];
 // Wait out a short rate limit once; a longer one surfaces as an error.
 const MAX_RETRY_AFTER_S = 5;
 
@@ -141,11 +144,19 @@ export class SpotifyClient {
     return (await response.json()) as T;
   }
 
-  private send(url: URL, token: string): Promise<Response> {
-    return this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-    });
+  private async send(url: URL, token: string): Promise<Response> {
+    for (let attempt = 0; ; attempt += 1) {
+      const last = attempt === ATTEMPT_TIMEOUTS_MS.length - 1;
+      try {
+        const response = await this.fetchImpl(url, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+          signal: AbortSignal.timeout(ATTEMPT_TIMEOUTS_MS[attempt])
+        });
+        if (last || response.status < 500) return response;
+      } catch (error) {
+        if (last) throw new SpotifyError(`Spotify didn't answer (${error instanceof Error ? error.message : "network error"})`, 504);
+      }
+    }
   }
 }
 

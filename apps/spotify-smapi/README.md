@@ -76,8 +76,8 @@ the Sonos account.
   returns a playlist's items only to its owner and collaborators. Such a playlist
   shows a single "Whole playlist" item that Sonos plays.
 - Search returns at most 10 results per type (the API's limit since February 2026).
-- Artists list their albums, singles and compilations; the API no longer has artist
-  top tracks.
+- Artists list up to 100 albums, singles and compilations (the API pages them 10 at a
+  time since February 2026); it no longer has artist top tracks.
 - Spotify plays on Sonos speakers only, not on "This device", and the VU meter shows no
   signal for it.
 - Spotify refresh tokens expire after six months; reconnect in Settings when the card
