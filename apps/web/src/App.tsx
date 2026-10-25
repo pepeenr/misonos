@@ -14,6 +14,7 @@ import { useFavorites, type FavoriteInput } from "./favorites.js";
 import { VuMeter } from "./VuMeter.js";
 import { useLocalPlayer, type LocalTrack } from "./localPlayer.js";
 import { ServiceIcon, SourcePicker } from "./SourcePicker.js";
+import { SpotifySettings } from "./SpotifySettings.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setPref } from "./prefs.js";
 
@@ -787,6 +788,7 @@ export function App() {
           <Alarms zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <AboutSystem />
           <YouTubeMusicAuth />
+          <SpotifySettings />
           <CustomMusicServices zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           {showDevPanels ? (
             <>
@@ -1255,6 +1257,8 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
   const supportsSearch = activeSource?.capabilities?.includes("search") ?? false;
   const supportsTypedSearch = sourceId === "youtube-music";
   const supportsPin = activeSource?.capabilities?.includes("pin") ?? false;
+  // Spotify plays through Sonos's own Spotify link, so there's no stream for "This device".
+  const sonosOnly = activeSource?.capabilities?.includes("sonos-only") ?? false;
 
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -1424,6 +1428,10 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
     setPlaying(`all:${mode}`);
     setStatus(null);
     try {
+      if (selectedGroupId === LOCAL_DEVICE_ID && sonosOnly) {
+        setStatus({ ok: false, message: `${activeSource?.name ?? "This source"} plays only on Sonos speakers.` });
+        return;
+      }
       if (selectedGroupId === LOCAL_DEVICE_ID) {
         const tracks: LocalTrack[] = (data?.items ?? [])
           .filter((entry) => entry.kind === "playable").slice(0, 100)
@@ -1442,7 +1450,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
     } finally {
       setPlaying(null);
     }
-  }, [sourceId, selectedGroupId, data, localPlayer]);
+  }, [sourceId, selectedGroupId, data, localPlayer, sonosOnly, activeSource?.name]);
 
   const enqueueItem = useCallback(async (item: SourceBrowseItem, mode: "replace" | "next" | "end") => {
     if (!sourceId || !selectedGroupId) {
@@ -1452,6 +1460,10 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
     setPlaying(`${item.id}:${mode}`);
     setStatus(null);
     try {
+      if (selectedGroupId === LOCAL_DEVICE_ID && sonosOnly) {
+        setStatus({ ok: false, message: `${activeSource?.name ?? "This source"} plays only on Sonos speakers.` });
+        return;
+      }
       if (selectedGroupId === LOCAL_DEVICE_ID) {
         const tracks = await buildLocalTracks(item);
         if (tracks.length === 0) { setStatus({ ok: false, message: `“${item.title}” has no playable tracks.` }); return; }
@@ -1463,6 +1475,9 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
       let trackIds: string[];
       if (item.kind === "playable") {
         trackIds = [item.id];
+      } else if (item.playId) {
+        // Queued whole in one call (Sonos expands a Spotify album or playlist itself).
+        trackIds = [item.playId];
       } else {
         const expansion = await bridgeApi.browseSource(sourceId, item.id);
         trackIds = expansion.items.filter((entry) => entry.kind === "playable").map((entry) => entry.id);
@@ -1472,14 +1487,14 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
         }
       }
       await bridgeApi.playSourceItems(sourceId, { trackIds, groupId: selectedGroupId, mode });
-      const label = trackIds.length === 1 ? `“${item.title}”` : `${trackIds.length} tracks from “${item.title}”`;
+      const label = trackIds.length === 1 || item.playId ? `“${item.title}”` : `${trackIds.length} tracks from “${item.title}”`;
       setStatus({ ok: true, message: `${verbFor(mode)} ${label}.` });
     } catch (err) {
       setStatus({ ok: false, message: err instanceof Error ? err.message : "Action failed" });
     } finally {
       setPlaying(null);
     }
-  }, [sourceId, selectedGroupId, buildLocalTracks, localPlayer]);
+  }, [sourceId, selectedGroupId, buildLocalTracks, localPlayer, sonosOnly, activeSource?.name]);
 
   if (sources && sources.length === 0) {
     return (

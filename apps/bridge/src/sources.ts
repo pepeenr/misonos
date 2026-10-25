@@ -32,8 +32,18 @@ const DEFAULT_SOURCES: SourceConfig[] = [
   { id: "live-music-archive", baseUrl: process.env.MISONOS_LMA_URL ?? "http://127.0.0.1:4322" },
   { id: "podcasts", baseUrl: process.env.MISONOS_PODCAST_URL ?? "http://127.0.0.1:4323" },
   { id: "tunein", baseUrl: process.env.MISONOS_TUNEIN_URL ?? "http://127.0.0.1:4324" },
-  { id: "navidrome", baseUrl: process.env.MISONOS_NAVIDROME_URL ?? "http://127.0.0.1:4325" }
+  { id: "navidrome", baseUrl: process.env.MISONOS_NAVIDROME_URL ?? "http://127.0.0.1:4325" },
+  { id: "spotify", baseUrl: process.env.MISONOS_SPOTIFY_URL ?? "http://127.0.0.1:4326" }
 ];
+
+// A source answered with an error status. `detail` is its JSON `error` message, for
+// places that show it to a person rather than log it.
+export class SourceRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly detail?: string) {
+    super(message);
+    this.name = "SourceRequestError";
+  }
+}
 
 const FETCH_TIMEOUT_MS = 8000;
 // Browse can fan out into many sequential upstream calls (e.g. YouTube Music's
@@ -107,6 +117,28 @@ export async function sourceAuthClearCookies(sourceId: string): Promise<unknown>
   return fetchJson<unknown>(new URL("/auth/cookies/clear", config.baseUrl), { method: "POST" });
 }
 
+// OAuth sign-in for sources that link an account (Spotify): the source returns the
+// provider URL to send the browser to, then completes the login from the callback query.
+export async function sourceAuthLogin(sourceId: string, redirectUri: string): Promise<{ url: string }> {
+  const config = requireConfig(sourceId);
+  const target = new URL("/auth/login", config.baseUrl);
+  target.searchParams.set("redirect_uri", redirectUri);
+  return fetchJson<{ url: string }>(target);
+}
+
+export async function sourceAuthCallback(sourceId: string, query: URLSearchParams): Promise<unknown> {
+  const config = requireConfig(sourceId);
+  const target = new URL("/auth/callback", config.baseUrl);
+  target.search = query.toString();
+  // The code exchange plus a profile lookup: two round trips to the provider.
+  return fetchJson<unknown>(target, undefined, BROWSE_TIMEOUT_MS);
+}
+
+export async function sourceAuthLogout(sourceId: string): Promise<unknown> {
+  const config = requireConfig(sourceId);
+  return fetchJson<unknown>(new URL("/auth/logout", config.baseUrl), { method: "POST" });
+}
+
 export async function sourceSubscriptions(sourceId: string): Promise<unknown> {
   const config = requireConfig(sourceId);
   return fetchJson<unknown>(new URL("/subscriptions", config.baseUrl));
@@ -144,10 +176,19 @@ async function fetchJson<T>(target: URL, init?: RequestInit, timeoutMs: number =
     const response = await fetch(target, { ...init, signal: controller.signal });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Source ${target.host} returned ${response.status}: ${text.slice(0, 200)}`);
+      throw new SourceRequestError(`Source ${target.host} returned ${response.status}: ${text.slice(0, 200)}`, response.status, errorField(text));
     }
     return (await response.json()) as T;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+function errorField(text: string): string | undefined {
+  try {
+    const body = JSON.parse(text) as { error?: unknown };
+    return typeof body.error === "string" ? body.error : undefined;
+  } catch {
+    return undefined;
   }
 }

@@ -138,7 +138,7 @@ RUN_SH="$APP/Contents/Resources/run.sh"
   fi
   echo "cd \"$REPO\" || exit 1"
   echo 'LOG="$HOME/Library/Logs"'
-  echo '# Optional per-host settings, e.g. MISONOS_NAVIDROME_SERVER_URL/_USER/_PASSWORD.'
+  echo '# Optional per-host settings, e.g. MISONOS_NAVIDROME_SERVER_URL/_USER/_PASSWORD or MISONOS_SPOTIFY_CLIENT_ID.'
   echo 'if [ -f "$HOME/.misonos/env" ]; then set -a; . "$HOME/.misonos/env"; set +a; fi'
   echo '# Clear any stale instances so a relaunch does not fight for ports.'
   echo 'pkill -f "tsx watch src/index.ts" 2>/dev/null'
@@ -153,6 +153,7 @@ RUN_SH="$APP/Contents/Resources/run.sh"
   echo 'npm run dev -w @misonos/podcast-smapi  >> "$LOG/misonos-podcast.log" 2>&1 &'
   echo 'npm run dev -w @misonos/tunein-smapi   >> "$LOG/misonos-tunein.log" 2>&1 &'
   echo 'npm run dev -w @misonos/navidrome-smapi >> "$LOG/misonos-navidrome.log" 2>&1 &'
+  echo 'npm run dev -w @misonos/spotify-smapi  >> "$LOG/misonos-spotify.log" 2>&1 &'
   echo 'npm run preview -w @misonos/web        >> "$LOG/misonos-web.log" 2>&1 &'
   echo '# The bridge runs as a child of the resident C launcher (the bundle main'
   echo '# executable), which stays alive as the Local-Network-responsible app.'
