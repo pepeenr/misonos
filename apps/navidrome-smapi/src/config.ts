@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import path from "node:path";
+
 export interface NavidromeConfig {
   host: string;
   port: number;
@@ -13,13 +16,13 @@ export interface NavidromeConfig {
   // Target codec + bitrate when a file isn't natively playable on Sonos (Opus, …).
   transcodeFormat: string;
   maxBitRate: number;
+  // Where a login saved from Settings is kept. It wins over the env vars above.
+  loginPath: string;
 }
 
-export interface NavidromeServer {
-  serverUrl: string;
-  username: string;
-  password: string;
-}
+// Either a password (a fresh salt per request) or a saved login's fixed salt and
+// token = md5(password + salt), so the password itself never has to be stored.
+export type NavidromeServer = { serverUrl: string; username: string } & ({ password: string } | { salt: string; token: string });
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): NavidromeConfig {
   return {
@@ -31,7 +34,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): NavidromeConfi
     password: env.MISONOS_NAVIDROME_PASSWORD || undefined,
     publicUrl: baseUrl(env.MISONOS_NAVIDROME_PUBLIC_URL),
     transcodeFormat: env.MISONOS_NAVIDROME_TRANSCODE_FORMAT || "mp3",
-    maxBitRate: Number.parseInt(env.MISONOS_NAVIDROME_MAX_BITRATE || "320", 10)
+    maxBitRate: Number.parseInt(env.MISONOS_NAVIDROME_MAX_BITRATE || "320", 10),
+    loginPath: env.MISONOS_NAVIDROME_LOGIN_PATH || path.join(homedir(), ".misonos", "navidrome-login.json")
   };
 }
 
@@ -44,7 +48,7 @@ export function serverFromConfig(config: NavidromeConfig): NavidromeServer | und
 
 // Accept only an absolute http(s) URL with a host — compose interpolation of an
 // unset variable yields things like "http://:4325", which must count as unset.
-function baseUrl(raw: string | undefined): string | undefined {
+export function baseUrl(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   try {
     const url = new URL(raw);

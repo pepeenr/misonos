@@ -219,6 +219,27 @@ export interface SourceDescriptor {
   capabilities?: string[];
 }
 
+// One row of the Settings source toggles: every source the bridge knows about,
+// running or not. A disabled source is left out of /api/sources entirely.
+export interface SourceSetting {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  // false when the source process didn't answer /info (not running, or not
+  // configured yet, e.g. Navidrome without a server).
+  available: boolean;
+}
+
+// A source's login as Settings shows it (Navidrome): saved from Settings, taken
+// from the source's env vars, or none. Never carries the password.
+export interface SourceLoginStatus {
+  source: "saved" | "env" | "none";
+  serverUrl?: string;
+  username?: string;
+  envConfigured: boolean;
+}
+
 export type SourceItemKind = "container" | "album" | "playable" | "section";
 
 export interface SourceBrowseItem {

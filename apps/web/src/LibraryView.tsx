@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, ChevronUp, ChevronDown, ListEnd, ListPlus, Play, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
-import type { Favorite, Playlist, PlaylistItem, PlaybackMode, RecentlyPlayedItem, RecentQueue, SonosGroup, SourceDescriptor } from "@misonos/sonos-protocol";
+import type { Favorite, Playlist, PlaylistItem, PlaybackMode, RecentlyPlayedItem, RecentQueue, SonosGroup, SourceSetting } from "@misonos/sonos-protocol";
 import { artSrc, bridgeApi } from "./api.js";
 import { GroupDropdown } from "./GroupDropdown.js";
 import { buildGroupOptions } from "./groupPalette.js";
@@ -22,7 +22,7 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup }: LibraryV
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [recentQueues, setRecentQueues] = useState<RecentQueue[]>([]);
   const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>([]);
-  const [sources, setSources] = useState<SourceDescriptor[]>([]);
+  const [sources, setSources] = useState<SourceSetting[]>([]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<OpenPlaylist | null>(null);
   const [newName, setNewName] = useState("");
@@ -65,7 +65,8 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup }: LibraryV
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { void refreshRecentQueues(); }, [refreshRecentQueues]);
   useEffect(() => { void refreshRecentlyPlayed(); }, [refreshRecentlyPlayed]);
-  useEffect(() => { void bridgeApi.listSources().then(setSources).catch(() => { /* non-fatal */ }); }, []);
+  // Names for every source, including ones switched off in Settings (their favorites stay).
+  useEffect(() => { void bridgeApi.sourceSettings().then(setSources).catch(() => { /* non-fatal */ }); }, []);
 
   const sourceName = useCallback(
     (sourceId: string) => sources.find((source) => source.id === sourceId)?.name ?? sourceId,

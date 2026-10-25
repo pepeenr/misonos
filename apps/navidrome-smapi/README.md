@@ -19,16 +19,30 @@ WAV and AIFF stream untouched.
 - `GET /track?id=` — a song's metadata plus this service's `/stream` URL.
 - `GET /stream?id=` — the audio, proxied from the server with auth added.
 - `GET /art?id=&size=` — cover art, proxied the same way.
+- `GET /config` — the active login (`source`: `saved`, `env` or `none`, plus server
+  URL and username; never the password or token).
+- `POST /config` `{ serverUrl, username, password }` — tests the login with
+  `ping` and, if the server accepts it, saves it and switches over at once.
+- `POST /config/clear` — forgets the saved login and falls back to the env vars.
 
 The Subsonic token never leaves this process: track and art URLs point back here,
 not at Navidrome.
+
+## Login
+
+Log in from MiSonos under **Settings → Custom Music Services** (the bridge relays
+`/api/sources/navidrome/config` here), or set the env vars below. A saved login
+wins over the env vars. It is stored as a fixed Subsonic salt + token
+(`md5(password + salt)`), not as the password: the token still opens the Subsonic
+API, but not the Navidrome web UI, and doesn't reveal a reused password.
 
 ## Config (env)
 
 | Var | Default | Notes |
 |-----|---------|-------|
-| `MISONOS_NAVIDROME_SERVER_URL` | — | e.g. `http://127.0.0.1:4533`; required |
-| `MISONOS_NAVIDROME_USER` / `MISONOS_NAVIDROME_PASSWORD` | — | required; a dedicated non-admin user is enough |
+| `MISONOS_NAVIDROME_SERVER_URL` | — | e.g. `http://127.0.0.1:4533`; fallback when nothing is saved |
+| `MISONOS_NAVIDROME_USER` / `MISONOS_NAVIDROME_PASSWORD` | — | fallback login; a dedicated non-admin user is enough |
+| `MISONOS_NAVIDROME_LOGIN_PATH` | `~/.misonos/navidrome-login.json` | where a login saved from Settings is kept |
 | `MISONOS_NAVIDROME_PUBLIC_URL` | Host header | base URL the **speakers** use for cover art — set to `http://<lan-ip>:4325` under Docker |
 | `MISONOS_NAVIDROME_PORT` | `4325` | HTTP port |
 | `MISONOS_NAVIDROME_TRANSCODE_FORMAT` | `mp3` | target for non-native files; must be a transcoding your server has |
