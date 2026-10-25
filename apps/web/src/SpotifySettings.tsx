@@ -84,6 +84,12 @@ export function SpotifySettings() {
 
   const redirectUri = status.redirectUri ?? callbackUrl();
   const redirectCode = <code style={{ userSelect: "all", wordBreak: "break-all" }}>{redirectUri}</code>;
+  // Shown while setting up too, so a LAN address isn't registered as the redirect URI.
+  const httpsWarning = acceptedBySpotify(redirectUri) ? null : (
+    <p className="settings-card-error">
+      Spotify accepts only https redirect URIs (or http://127.0.0.1). Open MiSonos over https to set up and connect.
+    </p>
+  );
   const selected = accounts?.selected;
   const pinnedByEnv = selected?.origin === "env";
 
@@ -107,6 +113,7 @@ export function SpotifySettings() {
             <li>Add this Redirect URI to the app: {redirectCode}</li>
             <li>Set <code>MISONOS_SPOTIFY_CLIENT_ID</code> on the spotify service to the app's Client ID, then restart it.</li>
           </ol>
+          {httpsWarning}
         </>
       ) : status.signedIn ? (
         <div className="settings-card-row">
@@ -124,11 +131,7 @@ export function SpotifySettings() {
           <p className="settings-card-help">
             One sign-in serves every device that uses this MiSonos. Your Spotify app must list this Redirect URI: {redirectCode}
           </p>
-          {acceptedBySpotify(redirectUri) ? null : (
-            <p className="settings-card-error">
-              Spotify accepts only https redirect URIs (or http://127.0.0.1). Open MiSonos over https to connect.
-            </p>
-          )}
+          {httpsWarning}
         </>
       )}
       {status.configured && accounts ? (
