@@ -1,4 +1,4 @@
-import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { IconMusic } from "@tabler/icons-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState } from "@misonos/sonos-protocol";
@@ -3102,27 +3102,46 @@ interface VolumeControlProps {
   swallowFirstAdjustment?: boolean;
 }
 
+// How long after a −/+ tap the next one builds on the value it sent, rather than on
+// the device volume, which confirms each change with a lag.
+const VOLUME_STEP_WINDOW_MS = 1500;
+
 function VolumeControl({ label, value, muted, maxVolume = 100, disabled = false, onChange, onMute, onSliderPointerDown, swallowFirstAdjustment = false }: VolumeControlProps) {
   const ignoreUntilRelease = useRef(false);
   const dragging = useRef(false);
+  const lastStep = useRef<{ volume: number; at: number } | null>(null);
   // While the finger is down we keep the value local and defer the (laggy) Sonos
   // send until release, so dragging tracks the thumb instantly instead of fighting
   // a stream of device confirmations. `dragValue` is non-null only mid-drag.
   const [dragValue, setDragValue] = useState<number | null>(null);
-  const displayValue = dragValue ?? Math.min(value, maxVolume);
+  const committed = Math.min(value, maxVolume);
+  const displayValue = dragValue ?? committed;
 
   const endDrag = () => {
     dragging.current = false;
     const pending = dragValue;
     setDragValue(null);
     if (ignoreUntilRelease.current) { ignoreUntilRelease.current = false; return; }
-    if (pending !== null && pending !== Math.min(value, maxVolume)) onChange(pending);
+    if (pending !== null && pending !== committed) onChange(pending);
+  };
+
+  // −/+ nudge the volume by one for fine control, which the slider is too coarse for
+  // on a phone. Quick repeated taps build on the last value sent.
+  const step = (delta: number) => {
+    const now = Date.now();
+    const recent = lastStep.current && now - lastStep.current.at < VOLUME_STEP_WINDOW_MS ? lastStep.current.volume : committed;
+    const next = Math.max(0, Math.min(maxVolume, recent + delta));
+    lastStep.current = { volume: next, at: now };
+    if (next !== recent) onChange(next);
   };
 
   return (
     <div className="volume-control">
       <button className={muted ? "icon-button muted" : "icon-button"} type="button" title={muted ? "Unmute" : "Mute"} aria-label={`${muted ? "Unmute" : "Mute"} ${label}`} disabled={disabled} onClick={() => void onMute()}>
         {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+      </button>
+      <button className="icon-button compact volume-step" type="button" title="Volume down" aria-label={`Lower ${label} volume`} disabled={disabled || committed <= 0} onClick={() => step(-1)}>
+        <Minus size={15} />
       </button>
       <div className="scrub-wrap">
         <input
@@ -3154,9 +3173,12 @@ function VolumeControl({ label, value, muted, maxVolume = 100, disabled = false,
           <span className="scrub-bubble" style={{ left: `${maxVolume > 0 ? (displayValue / maxVolume) * 100 : 0}%` }}>{displayValue}</span>
         )}
       </div>
+      <button className="icon-button compact volume-step" type="button" title="Volume up" aria-label={`Raise ${label} volume`} disabled={disabled || committed >= maxVolume} onClick={() => step(1)}>
+        <Plus size={15} />
+      </button>
       {/* Keep showing the committed volume here while dragging — the target lives
           in the bubble, so the two together read as "from X → Y". */}
-      <output>{Math.min(value, maxVolume)}</output>
+      <output>{committed}</output>
     </div>
   );
 }

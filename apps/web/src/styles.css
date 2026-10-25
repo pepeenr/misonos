@@ -2330,6 +2330,10 @@ small {
   accent-color: #91d3c4;
 }
 
+.volume-control .icon-button {
+  flex: none;
+}
+
 .volume-control output {
   width: 3ch;
   color: #d7d2c4;
