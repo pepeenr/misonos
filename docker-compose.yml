@@ -130,8 +130,10 @@ services:
     depends_on: [bridge]
     environment:
       MISONOS_SPOTIFY_PORT: "4326"
-      # Optional: the Client ID of your app on developer.spotify.com. The source stays
-      # hidden until it's set; then connect your account under Settings -> Spotify.
+      # The Client ID of your app on developer.spotify.com is entered under
+      # Settings -> Spotify and saved here; the env var below is an optional fallback.
+      # The source stays hidden until one is set.
+      MISONOS_SPOTIFY_CLIENT_ID_PATH: "/data/spotify-client-id.json"
       MISONOS_SPOTIFY_CLIENT_ID: "${MISONOS_SPOTIFY_CLIENT_ID:-}"
       # Optional: pin the OAuth redirect URI (it must be listed on the Spotify app).
       # Unset, the web app sends <the address you opened it on>/api/sources/spotify/auth/callback.

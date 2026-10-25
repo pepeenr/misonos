@@ -7,8 +7,10 @@ account linked in the Sonos app, like the Sonos app itself does.
 
 ## Setup
 
-1. Create an app on the [Spotify developer dashboard](https://developer.spotify.com/dashboard)
-   and tick **Web API**. In Development mode the app's owner needs Spotify Premium,
+Settings → Spotify walks through this with copy buttons.
+
+1. Create an app on the [Spotify developer dashboard](https://developer.spotify.com/dashboard/create)
+   and tick **Web API**. Spotify has no way to create one for you. In Development mode the app's owner needs Spotify Premium,
    and at most five authorized users can sign in. MiSonos needs one sign-in: the
    owner's.
 2. Add the Redirect URI the Settings card shows:
@@ -16,8 +18,10 @@ account linked in the Sonos app, like the Sonos app itself does.
    https, or plain http only for `127.0.0.1`/`[::1]`, so a LAN address like
    `http://192.168.1.10:6173` won't do. Open MiSonos over https (a Tailscale or
    Cloudflare hostname) to connect. Set `MISONOS_SPOTIFY_REDIRECT_URI` to pin one.
-3. Set `MISONOS_SPOTIFY_CLIENT_ID` to the app's Client ID and restart the service.
-   Sign-in uses the PKCE flow, so there is no client secret.
+3. Paste the app's Client ID under **Settings → Spotify**. It's saved to
+   `MISONOS_SPOTIFY_CLIENT_ID_PATH` and takes effect without a restart; the
+   `MISONOS_SPOTIFY_CLIENT_ID` env var is the fallback. Sign-in uses the PKCE flow,
+   so there is no client secret.
 4. In MiSonos, open **Settings → Spotify → Connect Spotify**. The refresh token is
    stored by this service, so one sign-in serves every device using this MiSonos.
 
@@ -34,7 +38,10 @@ pin it with `MISONOS_SPOTIFY_SN` on the bridge.
 ## Endpoints (JSON, consumed by the bridge)
 
 - `GET /info`: descriptor (`capabilities: ["search", "sonos-only"]`). **503** until
-  `MISONOS_SPOTIFY_CLIENT_ID` is set, which keeps the source out of the picker.
+  a Client ID is set, which keeps the source out of the picker.
+- `GET /config`, `POST /config {clientId}`, `POST /config/clear`: the Client ID
+  Settings shows and saves (`source`: saved, env or none). Changing it signs out,
+  since a sign-in belongs to the app that issued it.
 - `GET /browse?id=`: root (Playlists, Liked Songs, Albums, Artists, Recently Played,
   Top Tracks) or a node. Signed out, the root is a single notice.
 - `GET /search?q=`: songs, artists, albums and playlists under section headers.
@@ -49,7 +56,8 @@ pin it with `MISONOS_SPOTIFY_SN` on the bridge.
 
 | Var | Default | Notes |
 |-----|---------|-------|
-| `MISONOS_SPOTIFY_CLIENT_ID` | — | required; your Spotify app's Client ID |
+| `MISONOS_SPOTIFY_CLIENT_ID` | — | fallback when none is saved from Settings |
+| `MISONOS_SPOTIFY_CLIENT_ID_PATH` | `~/.misonos/spotify-client-id.json` | Client ID saved from Settings; `/data/spotify-client-id.json` under Docker |
 | `MISONOS_SPOTIFY_REDIRECT_URI` | from the browser | pin the OAuth redirect URI |
 | `MISONOS_SPOTIFY_TOKEN_PATH` | `~/.misonos/spotify-token.json` | refresh token store; `/data/spotify-token.json` under Docker |
 | `MISONOS_SPOTIFY_PORT` | `4326` | HTTP port |

@@ -6,8 +6,10 @@ export interface SpotifyConfig {
   port: number;
   serviceName: string;
   // Client ID of your own app on developer.spotify.com. Sign-in uses the PKCE flow,
-  // so there is no client secret to configure or keep.
+  // so there is no client secret to configure or keep. One saved from Settings
+  // (clientIdPath) wins over this env value.
   clientId?: string;
+  clientIdPath: string;
   // A fixed OAuth redirect URI. Unset, the web app sends the one for the address it
   // was opened on. Either way it must be listed on the Spotify app.
   redirectUri?: string;
@@ -21,6 +23,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpotifyConfig 
     port: Number.parseInt(env.MISONOS_SPOTIFY_PORT ?? "4326", 10),
     serviceName: env.MISONOS_SPOTIFY_NAME ?? "Spotify",
     clientId: env.MISONOS_SPOTIFY_CLIENT_ID?.trim() || undefined,
+    clientIdPath: env.MISONOS_SPOTIFY_CLIENT_ID_PATH || path.join(homedir(), ".misonos", "spotify-client-id.json"),
     redirectUri: redirectUri(env.MISONOS_SPOTIFY_REDIRECT_URI),
     tokenPath: env.MISONOS_SPOTIFY_TOKEN_PATH || path.join(homedir(), ".misonos", "spotify-token.json")
   };

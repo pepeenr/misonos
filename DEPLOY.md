@@ -170,11 +170,12 @@ only while editing code.
   MP3 by the server. Under Docker the URL must be reachable from the host network
   (`http://127.0.0.1:4533` with Navidrome's port published), not a service name
   like `http://navidrome:4533`. See [`apps/navidrome-smapi`](apps/navidrome-smapi/README.md).
-- **Spotify** appears once `MISONOS_SPOTIFY_CLIENT_ID` is set to the Client ID of an
-  app you create on the [Spotify developer dashboard](https://developer.spotify.com/dashboard)
-  (the app owner needs Premium). Add `https://<your MiSonos address>/api/sources/spotify/auth/callback`
-  as its Redirect URI (Spotify takes plain http only for `127.0.0.1`), then connect your
-  account under Settings → Spotify. Playback goes through the Spotify account linked in
+- **Spotify** appears once you paste the Client ID of an app you create on the
+  [Spotify developer dashboard](https://developer.spotify.com/dashboard/create) under
+  Settings → Spotify (or set `MISONOS_SPOTIFY_CLIENT_ID`); the app owner needs Premium.
+  Add `https://<your MiSonos address>/api/sources/spotify/auth/callback` as its Redirect
+  URI (Spotify takes plain http only for `127.0.0.1`), then connect your account in the
+  same card. Playback goes through the Spotify account linked in
   the Sonos app, which MiSonos reads off a Spotify item in your Sonos Favorites. See
   [`apps/spotify-smapi`](apps/spotify-smapi/README.md).
 - **A missing Grateful DB** only breaks Grateful Dead browsing; the other sources

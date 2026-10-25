@@ -65,6 +65,15 @@ describe("SpotifyAuth", () => {
     expect(await reloaded.status()).toEqual({ signedIn: true, user: undefined });
   });
 
+  it("treats a token issued to another app as signed out", async () => {
+    const issue = fakeTokens(() => ({ body: { access_token: "a", refresh_token: "r", expires_in: 3600 } }));
+    const first = new SpotifyAuth("client-1", tokenPath, issue);
+    await first.completeLogin("code", new URL(first.beginLogin(REDIRECT)).searchParams.get("state") ?? "");
+    expect(JSON.parse(await readFile(tokenPath, "utf8")).clientId).toBe("client-1");
+    expect(await new SpotifyAuth("client-1", tokenPath, issue).status()).toMatchObject({ signedIn: true });
+    expect(await new SpotifyAuth("client-2", tokenPath, issue).status()).toEqual({ signedIn: false });
+  });
+
   it("rejects an unknown or reused state", async () => {
     const auth = new SpotifyAuth("client-1", tokenPath, fakeTokens(() => ({
       body: { access_token: "a", refresh_token: "r", expires_in: 3600 }

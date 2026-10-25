@@ -289,6 +289,14 @@ export interface SpotifyAccountsView {
   selected?: { sid: number; sn: number; token: string; origin: SpotifyAccountOrigin };
 }
 
+// The Spotify app's Client ID as Settings shows it: saved from Settings, taken from
+// MISONOS_SPOTIFY_CLIENT_ID, or none. Not a secret, so it's shown back.
+export interface SpotifyClientStatus {
+  source: "saved" | "env" | "none";
+  clientId?: string;
+  envConfigured: boolean;
+}
+
 export interface SpotifyAuthStatus {
   configured: boolean;
   signedIn: boolean;
