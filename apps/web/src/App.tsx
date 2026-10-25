@@ -1,6 +1,6 @@
 import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { IconMusic } from "@tabler/icons-react";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
 import { artSrc, bridgeApi, subscribeBridgeEvents } from "./api.js";
@@ -1828,6 +1828,16 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
     }
   }, [onSourcesChanged]);
 
+  // After a login change: Navidrome may have appeared or vanished.
+  const refreshSources = useCallback(async () => {
+    try {
+      setSourceSettings(await bridgeApi.sourceSettings());
+    } catch {
+      /* keep the current list */
+    }
+    onSourcesChanged();
+  }, [onSourcesChanged]);
+
   const disabledSourceIds = useMemo(
     () => new Set(sourceSettings.filter((source) => !source.enabled).map((source) => source.id)),
     [sourceSettings]
@@ -1980,22 +1990,25 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
               {toggleError ? <div className="service-result error">{toggleError}</div> : null}
               <div className="source-toggles">
                 {sourceSettings.map((source) => (
-                  <label key={source.id} className={source.enabled ? "pref-row source-toggle" : "pref-row source-toggle off"}>
-                    <span className="source-toggle-name">
-                      <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
-                      <span className="pref-label">
-                        <strong>{source.name}</strong>
-                        {source.available ? null : <small>Not running or not configured</small>}
+                  <Fragment key={source.id}>
+                    <label className={source.enabled ? "pref-row source-toggle" : "pref-row source-toggle off"}>
+                      <span className="source-toggle-name">
+                        <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
+                        <span className="pref-label">
+                          <strong>{source.name}</strong>
+                          {source.available ? null : <small>Not running or not configured</small>}
+                        </span>
                       </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      aria-label={`Show ${source.name}`}
-                      checked={source.enabled}
-                      onChange={(event) => void toggleSource(source.id, event.target.checked)}
-                    />
-                  </label>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        aria-label={`Show ${source.name}`}
+                        checked={source.enabled}
+                        onChange={(event) => void toggleSource(source.id, event.target.checked)}
+                      />
+                    </label>
+                    {source.id === "navidrome" && source.enabled ? <NavidromeLogin onChanged={() => void refreshSources()} /> : null}
+                  </Fragment>
                 ))}
               </div>
             </div>
@@ -2025,6 +2038,115 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
         </div>
       ) : null}
     </section>
+  );
+}
+
+// Navidrome's login, saved by the source itself (as a Subsonic salt + token, not
+// the password). It takes precedence over the MISONOS_NAVIDROME_* env vars, which
+// remain the fallback.
+function NavidromeLogin({ onChanged }: { onChanged: () => void }) {
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof bridgeApi.sourceLogin>> | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [serverUrl, setServerUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void bridgeApi.sourceLogin("navidrome").then(setStatus).catch((err) => {
+      setError(err instanceof Error ? `Navidrome service: ${err.message}` : "Navidrome service unreachable");
+    });
+  }, []);
+
+  const startEditing = () => {
+    setServerUrl(status?.serverUrl ?? "");
+    setUsername(status?.username ?? "");
+    setPassword("");
+    setError("");
+    setEditing(true);
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      setStatus(await bridgeApi.saveSourceLogin("navidrome", { serverUrl, username, password }));
+      setPassword("");
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save the login");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const forget = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      setStatus(await bridgeApi.clearSourceLogin("navidrome"));
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't forget the login");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const summary = !status
+    ? null
+    : status.source === "none"
+      ? "Not logged in."
+      : `${status.username} on ${status.serverUrl}${status.source === "saved" ? " (saved here)" : " (from env vars)"}`;
+
+  return (
+    <div className="source-login">
+      {summary && !editing ? (
+        <div className="settings-card-row">
+          <span className="source-login-summary">{summary}</span>
+          <span className="source-login-actions">
+            {status?.source === "saved" ? (
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                title={status.envConfigured ? "Go back to the login from the env vars" : "Hide Navidrome until you log in again"}
+                onClick={() => void forget()}
+              >
+                {status.envConfigured ? "Use env login" : "Log out"}
+              </button>
+            ) : null}
+            <button type="button" disabled={busy} onClick={startEditing}>{status?.source === "none" ? "Log in" : "Change"}</button>
+          </span>
+        </div>
+      ) : null}
+      {editing ? (
+        <form
+          className="custom-service-controls"
+          onSubmit={(event) => { event.preventDefault(); void save(); }}
+        >
+          <label>
+            <span>Server URL</span>
+            <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://127.0.0.1:4533" autoComplete="off" required />
+          </label>
+          <label>
+            <span>Username</span>
+            <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required />
+          </label>
+          <span className="source-login-actions">
+            <button type="submit" disabled={busy}>{busy ? "Testing…" : "Save"}</button>
+            <button type="button" className="secondary" disabled={busy} onClick={() => { setEditing(false); setError(""); }}>Cancel</button>
+          </span>
+        </form>
+      ) : null}
+      {error ? <p className="settings-card-error">{error}</p> : null}
+    </div>
   );
 }
 

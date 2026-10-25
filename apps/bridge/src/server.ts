@@ -9,7 +9,7 @@ import { proxyStream } from "./streamProxy.js";
 import { subscribeMeter } from "./meter.js";
 import { serveArt } from "./artProxy.js";
 import { deleteSourceIcon, listSourceIcons, saveSourceIcon, serveSourceIcon } from "./sourceIcons.js";
-import { isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled } from "./sources.js";
+import { isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled, sourceClearConfig, sourceConfig, sourceSaveConfig } from "./sources.js";
 import path from "node:path";
 
 type RouteHandler = (
@@ -318,6 +318,21 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       const body = await readJson<{ enabled?: unknown }>(request);
       if (typeof body.enabled !== "boolean") return json(response, { error: "enabled must be a boolean" }, 400);
       return json(response, await listSourceSettings(await setSourceEnabled(store, sourceId, body.enabled)));
+    }
+
+    // Per-source settings (Navidrome's login), relayed with the source's own status.
+    const sourceConfigMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/config(\/clear)?$/);
+    if (sourceConfigMatch && (request.method === "GET" || request.method === "POST")) {
+      const sourceId = decodeURIComponent(sourceConfigMatch[1]);
+      const clear = Boolean(sourceConfigMatch[2]);
+      if (request.method === "GET" && !clear) {
+        const reply = await sourceConfig(sourceId);
+        return json(response, reply.body, reply.status);
+      }
+      if (request.method === "POST") {
+        const reply = clear ? await sourceClearConfig(sourceId) : await sourceSaveConfig(sourceId, await readJson<unknown>(request));
+        return json(response, reply.body, reply.status);
+      }
     }
 
     // Custom per-source logos (uploaded from Settings). List/serve are public GETs;

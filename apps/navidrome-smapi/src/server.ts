@@ -2,11 +2,12 @@ import http from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { NavidromeBrowser } from "./browse.js";
-import { serverFromConfig, type NavidromeConfig } from "./config.js";
+import { baseUrl, serverFromConfig, type NavidromeConfig } from "./config.js";
 import { encodeId } from "./ids.js";
+import { clearSavedLogin, serverFromLogin, writeSavedLogin, type SavedLogin } from "./login.js";
 import { mp3Bitrate } from "./mp3.js";
 import { exactly, planStream, type SizedResponse, type StreamPlan } from "./stream.js";
-import { SubsonicClient, type SubsonicSong } from "./subsonic.js";
+import { SubsonicClient, SubsonicError, subsonicToken, type SubsonicSong } from "./subsonic.js";
 
 const SONG_CACHE_TTL_MS = 10 * 60 * 1000;
 const SONG_CACHE_MAX = 500;
@@ -14,10 +15,10 @@ const SONG_CACHE_MAX = 500;
 const PROBE_LIMIT = 64 * 1024;
 const PASSTHROUGH_HEADERS = ["content-type", "content-length", "content-range", "accept-ranges", "last-modified", "etag"];
 
-export function createServer(config: NavidromeConfig): http.Server {
-  const server = serverFromConfig(config);
-  const api = server ? new SubsonicClient(server) : undefined;
-  const browser = api ? new NavidromeBrowser(api, config) : undefined;
+export function createServer(config: NavidromeConfig, savedLogin?: SavedLogin): http.Server {
+  const envServer = serverFromConfig(config);
+  let login = savedLogin;
+  let connection: { api: SubsonicClient; browser: NavidromeBrowser } | undefined;
   // Sonos issues several requests per track (HEAD, ranges); resolve each song once.
   const songs = new Map<string, { song: SubsonicSong; expires: number }>();
 
@@ -33,6 +34,52 @@ export function createServer(config: NavidromeConfig): http.Server {
   // Transcode bitrates read off the stream itself, so later seeks map bytes to time
   // with the real figure even where the prediction from the song's bitrate is off.
   const bitrates = new Map<string, number>();
+
+  // A login saved from Settings wins; the env vars are the fallback; with neither
+  // the source stays hidden.
+  const connect = () => {
+    const server = login ? serverFromLogin(login) : envServer;
+    const api = server ? new SubsonicClient(server) : undefined;
+    connection = api ? { api, browser: new NavidromeBrowser(api, config) } : undefined;
+    songs.clear();
+    bitrates.clear();
+  };
+  connect();
+
+  // What Settings shows. Never includes the password or token.
+  const loginStatus = () => {
+    const active = login ?? envServer;
+    return {
+      source: login ? "saved" : envServer ? "env" : "none",
+      serverUrl: active?.serverUrl,
+      username: active?.username,
+      envConfigured: Boolean(envServer)
+    };
+  };
+
+  // Save a login only once the server accepts it.
+  const saveLogin = async (request: http.IncomingMessage, response: http.ServerResponse): Promise<void> => {
+    const body = await readJson<{ serverUrl?: unknown; username?: unknown; password?: unknown }>(request);
+    const serverUrl = typeof body.serverUrl === "string" ? baseUrl(body.serverUrl.trim()) : undefined;
+    const username = typeof body.username === "string" ? body.username.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!serverUrl) return sendJson(response, 400, { error: "Enter the server URL, e.g. http://127.0.0.1:4533" });
+    if (!username || !password) return sendJson(response, 400, { error: "Enter a username and password" });
+    const candidate: SavedLogin = { serverUrl, username, ...subsonicToken(password), savedAt: new Date().toISOString() };
+    try {
+      await new SubsonicClient(serverFromLogin(candidate)).ping();
+    } catch (error) {
+      const reason = error instanceof SubsonicError
+        ? error.code === 40 ? "Wrong username or password" : error.message
+        : `No Subsonic server answered at ${serverUrl} (${errorMessage(error)})`;
+      return sendJson(response, 400, { error: reason });
+    }
+    await writeSavedLogin(config.loginPath, candidate);
+    login = candidate;
+    connect();
+    console.log(`[navidrome-smapi] saved login: ${serverUrl} as ${username}`);
+    sendJson(response, 200, loginStatus());
+  };
 
   // A CBR MP3 transcode, sized by `plan`. HEAD and unsatisfiable ranges are answered
   // without starting a transcode.
@@ -79,14 +126,29 @@ export function createServer(config: NavidromeConfig): http.Server {
       const base = config.publicUrl ?? url.origin;
 
       if (request.method === "GET" && url.pathname === "/health") {
-        return sendJson(response, 200, { ok: true, service: config.serviceName, configured: Boolean(api) });
+        return sendJson(response, 200, { ok: true, service: config.serviceName, configured: Boolean(connection) });
+      }
+      if (request.method === "GET" && url.pathname === "/config") {
+        return sendJson(response, 200, loginStatus());
+      }
+      if (request.method === "POST" && url.pathname === "/config") {
+        return await saveLogin(request, response);
+      }
+      if (request.method === "POST" && url.pathname === "/config/clear") {
+        await clearSavedLogin(config.loginPath);
+        login = undefined;
+        connect();
+        console.log("[navidrome-smapi] saved login cleared");
+        return sendJson(response, 200, loginStatus());
       }
       // Unconfigured, the bridge's /info probe fails and the source stays hidden.
-      if (!api || !browser) {
+      if (!connection) {
         return sendJson(response, 503, {
-          error: "Navidrome is not configured: set MISONOS_NAVIDROME_SERVER_URL, MISONOS_NAVIDROME_USER and MISONOS_NAVIDROME_PASSWORD"
+          error: "Navidrome is not configured: log in under Settings → Custom Music Services, or set MISONOS_NAVIDROME_SERVER_URL, MISONOS_NAVIDROME_USER and MISONOS_NAVIDROME_PASSWORD"
         });
       }
+      // Pinned per request, so a login change mid-request can't mix servers.
+      const { api, browser } = connection;
       if (request.method === "GET" && url.pathname === "/info") {
         return sendJson(response, 200, {
           id: "navidrome",
@@ -254,6 +316,18 @@ function subsonicError(text: string): string {
   } catch {
     return "request failed";
   }
+}
+
+async function readJson<T>(request: http.IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > 16 * 1024) throw new Error("Request body too large");
+    chunks.push(chunk as Buffer);
+  }
+  const raw = Buffer.concat(chunks).toString("utf8");
+  return (raw ? JSON.parse(raw) : {}) as T;
 }
 
 function sendJson(response: http.ServerResponse, status: number, payload: unknown): void {

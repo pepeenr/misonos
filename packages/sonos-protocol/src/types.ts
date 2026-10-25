@@ -228,6 +228,15 @@ export interface SourceSetting {
   available: boolean;
 }
 
+// A source's login as Settings shows it (Navidrome): saved from Settings, taken
+// from the source's env vars, or none. Never carries the password.
+export interface SourceLoginStatus {
+  source: "saved" | "env" | "none";
+  serverUrl?: string;
+  username?: string;
+  envConfigured: boolean;
+}
+
 export type SourceItemKind = "container" | "album" | "playable" | "section";
 
 export interface SourceBrowseItem {

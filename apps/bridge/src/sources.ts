@@ -162,6 +162,53 @@ export async function sourcePin(sourceId: string, id: string, pinned: boolean): 
   });
 }
 
+// Source settings (Navidrome's login form). Replies pass through with their status
+// so the form can show the source's own message, e.g. "Wrong username or password".
+export interface SourceReply {
+  status: number;
+  body: unknown;
+}
+
+export async function sourceConfig(sourceId: string): Promise<SourceReply> {
+  return relayJson(new URL("/config", requireConfig(sourceId).baseUrl));
+}
+
+export async function sourceSaveConfig(sourceId: string, body: unknown): Promise<SourceReply> {
+  const reply = await relayJson(new URL("/config", requireConfig(sourceId).baseUrl), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  // A new login can turn /info from 503 into a descriptor (or back): ask again.
+  infoCache.delete(sourceId);
+  return reply;
+}
+
+export async function sourceClearConfig(sourceId: string): Promise<SourceReply> {
+  const reply = await relayJson(new URL("/config/clear", requireConfig(sourceId).baseUrl), { method: "POST" });
+  infoCache.delete(sourceId);
+  return reply;
+}
+
+// Saving a login waits for the source to test it against its server.
+const CONFIG_TIMEOUT_MS = 15000;
+
+async function relayJson(target: URL, init?: RequestInit): Promise<SourceReply> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG_TIMEOUT_MS);
+  try {
+    const response = await fetch(target, { ...init, signal: controller.signal });
+    const text = await response.text();
+    try {
+      return { status: response.status, body: JSON.parse(text) };
+    } catch {
+      return { status: response.ok ? 502 : response.status, body: { error: text.slice(0, 200) || `HTTP ${response.status}` } };
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchInfo(config: SourceConfig): Promise<SourceDescriptor> {
   const cached = infoCache.get(config.id);
   if (cached) return cached;
