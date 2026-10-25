@@ -216,6 +216,18 @@ export interface SourceDescriptor {
   capabilities?: string[];
 }
 
+// One row of the Settings source toggles: every source the bridge knows about,
+// running or not. A disabled source is left out of /api/sources entirely.
+export interface SourceSetting {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  // false when the source process didn't answer /info (not running, or not
+  // configured yet, e.g. Navidrome without a server).
+  available: boolean;
+}
+
 export type SourceItemKind = "container" | "album" | "playable" | "section";
 
 export interface SourceBrowseItem {

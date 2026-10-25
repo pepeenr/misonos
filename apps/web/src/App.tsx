@@ -83,6 +83,9 @@ export function App() {
   // sourceId → version token for user-uploaded service logos (shared by the source
   // dropdown and the Settings upload widget); the token busts the browser cache.
   const [customIcons, setCustomIcons] = useState<Record<string, string>>({});
+  // Bumped when a source is switched on/off in Settings so the (always-mounted)
+  // browser and the logo list re-fetch /api/sources.
+  const [sourcesVersion, setSourcesVersion] = useState(0);
   const groupEditQueueRef = useRef<PendingGroupEdit[]>([]);
   const groupEditProcessingRef = useRef(false);
   // Best-known "last selected group" membership key — seeded synchronously from the
@@ -753,6 +756,7 @@ export function App() {
           selectedGroupId={selectedGroupId || selectedGroup?.id}
           onSelectGroup={setSelectedGroupId}
           customIcons={customIcons}
+          sourcesVersion={sourcesVersion}
         />
       </section>
 
@@ -782,12 +786,16 @@ export function App() {
             }}
             onMaxVolumeCommit={(value) => void enforceVolumeCap(value)}
           />
-          <SourceLogoSettings customIcons={customIcons} onChanged={() => void refreshCustomIcons()} />
+          <SourceLogoSettings customIcons={customIcons} sourcesVersion={sourcesVersion} onChanged={() => void refreshCustomIcons()} />
           <Equalizer zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <Alarms zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <AboutSystem />
           <YouTubeMusicAuth />
-          <CustomMusicServices zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
+          <CustomMusicServices
+            zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)}
+            customIcons={customIcons}
+            onSourcesChanged={() => setSourcesVersion((version) => version + 1)}
+          />
           {showDevPanels ? (
             <>
               <MusicServicesDebug />
@@ -1132,6 +1140,7 @@ interface SourceBrowserProps {
   selectedGroupId?: string;
   onSelectGroup: (groupId: string) => void;
   customIcons: Record<string, string>;
+  sourcesVersion: number;
 }
 
 interface BrowseCrumb {
@@ -1145,7 +1154,7 @@ function BrowseThumb({ src }: { src?: string }) {
   return <img className="browse-thumb" src={artSrc(src)} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: SourceBrowserProps) {
+function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, sourcesVersion }: SourceBrowserProps) {
   const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>> | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
   const sourceInitializedRef = useRef(false);
@@ -1335,7 +1344,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
         setError(err instanceof Error ? err.message : "Failed to load sources");
       }
     })();
-  }, [sourceId, persistSourceId]);
+  }, [sourceId, persistSourceId, sourcesVersion]);
 
   useEffect(() => {
     if (!sourceId || searchActive) return;
@@ -1484,7 +1493,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
   if (sources && sources.length === 0) {
     return (
       <section className="queue-panel">
-        <div className="empty-panel">No browse sources are running. Start a source service (e.g. <code>npm run dev:grateful</code>).</div>
+        <div className="empty-panel">No browse sources are running. Start a source service (e.g. <code>npm run dev:grateful</code>), or turn one back on under Settings → Custom Music Services.</div>
       </section>
     );
   }
@@ -1769,11 +1778,15 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons }: 
 
 interface CustomMusicServicesProps {
   zones: SonosZone[];
+  customIcons: Record<string, string>;
+  onSourcesChanged: () => void;
 }
 
-function CustomMusicServices({ zones }: CustomMusicServicesProps) {
+function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMusicServicesProps) {
   const [presets, setPresets] = useState<Awaited<ReturnType<typeof bridgeApi.customServicePresets>> | null>(null);
   const [discovered, setDiscovered] = useState<Awaited<ReturnType<typeof bridgeApi.musicServices>> | null>(null);
+  const [sourceSettings, setSourceSettings] = useState<Awaited<ReturnType<typeof bridgeApi.sourceSettings>>>([]);
+  const [toggleError, setToggleError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [zoneByPreset, setZoneByPreset] = useState<Record<string, string>>({});
@@ -1785,12 +1798,14 @@ function CustomMusicServices({ zones }: CustomMusicServicesProps) {
     setLoading(true);
     setError("");
     try {
-      const [nextPresets, nextDiscovered] = await Promise.all([
+      const [nextPresets, nextDiscovered, nextSourceSettings] = await Promise.all([
         bridgeApi.customServicePresets(),
-        bridgeApi.musicServices().catch(() => null)
+        bridgeApi.musicServices().catch(() => null),
+        bridgeApi.sourceSettings()
       ]);
       setPresets(nextPresets);
       setDiscovered(nextDiscovered);
+      setSourceSettings(nextSourceSettings);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -1799,6 +1814,24 @@ function CustomMusicServices({ zones }: CustomMusicServicesProps) {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Flip the switch right away, then settle on the bridge's answer (or roll back).
+  const toggleSource = useCallback(async (sourceId: string, enabled: boolean) => {
+    setToggleError("");
+    setSourceSettings((current) => current.map((source) => (source.id === sourceId ? { ...source, enabled } : source)));
+    try {
+      setSourceSettings(await bridgeApi.setSourceEnabled(sourceId, enabled));
+      onSourcesChanged();
+    } catch (err) {
+      setSourceSettings((current) => current.map((source) => (source.id === sourceId ? { ...source, enabled: !enabled } : source)));
+      setToggleError(err instanceof Error ? err.message : "Failed");
+    }
+  }, [onSourcesChanged]);
+
+  const disabledSourceIds = useMemo(
+    () => new Set(sourceSettings.filter((source) => !source.enabled).map((source) => source.id)),
+    [sourceSettings]
+  );
 
   const registeredNames = useMemo(() => new Set(discovered?.services.map((service) => service.name.toLowerCase()) ?? []), [discovered]);
   // True only when the WHOLE household is confirmed S2 (a Sonos household is
@@ -1917,8 +1950,10 @@ function CustomMusicServices({ zones }: CustomMusicServicesProps) {
     );
   };
 
-  const requiredPresets = presets?.filter((preset) => preset.registrationRequired) ?? [];
-  const optionalPresets = presets?.filter((preset) => !preset.registrationRequired) ?? [];
+  // A switched-off source has nothing to register.
+  const enabledPresets = presets?.filter((preset) => !disabledSourceIds.has(preset.id)) ?? [];
+  const requiredPresets = enabledPresets.filter((preset) => preset.registrationRequired);
+  const optionalPresets = enabledPresets.filter((preset) => !preset.registrationRequired);
 
   return (
     <section className="queue-panel" aria-label="Custom music services">
@@ -1934,8 +1969,37 @@ function CustomMusicServices({ zones }: CustomMusicServicesProps) {
         <div className="empty-panel">Loading...</div>
       ) : error ? (
         <div className="empty-panel error-panel"><span>{error}</span></div>
-      ) : presets && presets.length > 0 ? (
+      ) : presets ? (
         <div className="custom-services-groups">
+          {sourceSettings.length > 0 ? (
+            <div className="custom-services-group">
+              <div className="custom-services-group-heading">
+                <h3>Sources</h3>
+                <p>Switch a source off to hide it from Music on every device. Favorites, playlists and queued tracks from it still play.</p>
+              </div>
+              {toggleError ? <div className="service-result error">{toggleError}</div> : null}
+              <div className="source-toggles">
+                {sourceSettings.map((source) => (
+                  <label key={source.id} className={source.enabled ? "pref-row source-toggle" : "pref-row source-toggle off"}>
+                    <span className="source-toggle-name">
+                      <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
+                      <span className="pref-label">
+                        <strong>{source.name}</strong>
+                        {source.available ? null : <small>Not running or not configured</small>}
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      aria-label={`Show ${source.name}`}
+                      checked={source.enabled}
+                      onChange={(event) => void toggleSource(source.id, event.target.checked)}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {requiredPresets.length > 0 ? (
             <div className="custom-services-group">
               <div className="custom-services-group-heading">
@@ -1959,9 +2023,7 @@ function CustomMusicServices({ zones }: CustomMusicServicesProps) {
             </div>
           ) : null}
         </div>
-      ) : (
-        <div className="empty-panel">No presets defined.</div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -2161,10 +2223,11 @@ function Equalizer({ zones }: EqualizerProps) {
 
 interface SourceLogoSettingsProps {
   customIcons: Record<string, string>;
+  sourcesVersion: number;
   onChanged: () => void;
 }
 
-function SourceLogoSettings({ customIcons, onChanged }: SourceLogoSettingsProps) {
+function SourceLogoSettings({ customIcons, sourcesVersion, onChanged }: SourceLogoSettingsProps) {
   const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>>>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -2172,7 +2235,7 @@ function SourceLogoSettings({ customIcons, onChanged }: SourceLogoSettingsProps)
 
   useEffect(() => {
     void bridgeApi.listSources().then(setSources).catch(() => undefined);
-  }, []);
+  }, [sourcesVersion]);
 
   const upload = useCallback(async (sourceId: string, file: File | undefined) => {
     if (!file) return;

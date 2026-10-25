@@ -735,6 +735,27 @@ h2 {
   color: #9aa39f;
 }
 
+.source-toggles .pref-row {
+  padding: 8px 0;
+}
+
+.source-toggle-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.source-toggle-name .service-icon {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+}
+
+.source-toggle.off .source-toggle-name {
+  opacity: 0.5;
+}
+
 .custom-service-card {
   border: 1px solid rgba(242, 240, 232, 0.12);
   border-radius: 8px;
