@@ -17,6 +17,9 @@ const PAGE = 50;
 // queues it whole through Sonos, so the cap only limits what a list shows.
 const MAX_TRACKS = 300;
 const MAX_LIST = 500;
+// An artist's releases page at most 10 at a time (since February 2026), so fewer.
+const ARTIST_PAGE = 10;
+const MAX_ARTIST_ALBUMS = 100;
 // The API's maximum per type since February 2026.
 const SEARCH_LIMIT = 10;
 const ART_WIDTH = 300;
@@ -106,8 +109,8 @@ export class SpotifyBrowser {
       case "artist": {
         const albums = await this.api.pages<SpotifyAlbum>(
           `/artists/${node.id}/albums`,
-          { include_groups: ALBUM_GROUPS.map((group) => group.type).join(","), limit: PAGE },
-          MAX_LIST
+          { include_groups: ALBUM_GROUPS.map((group) => group.type).join(","), limit: ARTIST_PAGE },
+          MAX_ARTIST_ALBUMS
         );
         return ALBUM_GROUPS.flatMap(({ type, title }) => {
           const group = albums.filter((album) => (album.album_type ?? "album") === type);

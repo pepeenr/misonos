@@ -125,7 +125,7 @@ describe("SpotifyBrowser", () => {
 
   it("groups an artist's releases by type", async () => {
     const result = await browser({
-      "/artists/ar1/albums?include_groups=album%2Csingle%2Ccompilation&limit=50": {
+      "/artists/ar1/albums?include_groups=album%2Csingle%2Ccompilation&limit=10": {
         items: [
           { id: "s1", name: "Single", album_type: "single", artists: [{ id: "ar1", name: "Artist One" }], release_date: "2024-03-01" },
           { id: "a1", name: "Debut", album_type: "album", artists: [{ id: "ar1", name: "Artist One" }], release_date: "2020" }
