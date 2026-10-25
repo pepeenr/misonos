@@ -792,7 +792,7 @@ export function App() {
           <Alarms zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <AboutSystem />
           <YouTubeMusicAuth />
-          <SpotifySettings />
+          <SpotifySettings onSourcesChanged={() => setSourcesVersion((version) => version + 1)} />
           <CustomMusicServices
             zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)}
             customIcons={customIcons}

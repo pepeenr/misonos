@@ -26,6 +26,8 @@ export interface SpotifyUser {
 }
 
 export interface StoredToken {
+  // The app (Client ID) that issued the token; refreshing needs the same one.
+  clientId?: string;
   accessToken: string;
   refreshToken: string;
   expiresAt: number; // epoch ms
@@ -174,8 +176,9 @@ export class SpotifyAuth {
     if (this.token !== undefined) return this.token;
     try {
       const parsed = JSON.parse(await readFile(this.tokenPath, "utf8")) as Partial<StoredToken>;
-      this.token = parsed.accessToken && parsed.refreshToken
-        ? { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, expiresAt: Number(parsed.expiresAt) || 0, scope: parsed.scope, user: parsed.user }
+      const sameApp = !parsed.clientId || parsed.clientId === this.clientId;
+      this.token = parsed.accessToken && parsed.refreshToken && sameApp
+        ? { clientId: parsed.clientId, accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, expiresAt: Number(parsed.expiresAt) || 0, scope: parsed.scope, user: parsed.user }
         : null;
     } catch {
       this.token = null;
@@ -184,6 +187,7 @@ export class SpotifyAuth {
   }
 
   private async save(token: StoredToken): Promise<void> {
+    token = { ...token, clientId: this.clientId };
     this.token = token;
     await mkdir(path.dirname(this.tokenPath), { recursive: true });
     const temp = `${this.tokenPath}.tmp`;

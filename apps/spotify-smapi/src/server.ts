@@ -1,7 +1,8 @@
 import http from "node:http";
-import type { SourceBrowseItem } from "@misonos/sonos-protocol";
+import type { SourceBrowseItem, SpotifyClientStatus } from "@misonos/sonos-protocol";
 import { SpotifyAuth, SpotifyAuthError } from "./auth.js";
 import { SpotifyBrowser } from "./browse.js";
+import { clearSavedClientId, parseClientId, writeSavedClientId, type SavedClientId } from "./clientId.js";
 import { redirectUri, type SpotifyConfig } from "./config.js";
 import { IdError } from "./ids.js";
 import { SpotifyClient, SpotifyError, type SpotifyProfile } from "./spotify.js";
@@ -13,27 +14,87 @@ const SIGN_IN_NOTICE: SourceBrowseItem = {
   kind: "section"
 };
 
-export function createServer(config: SpotifyConfig, fetchImpl: typeof fetch = fetch): http.Server {
-  const auth = config.clientId ? new SpotifyAuth(config.clientId, config.tokenPath, fetchImpl) : undefined;
-  const api = auth ? new SpotifyClient(auth, fetchImpl) : undefined;
-  const browser = api ? new SpotifyBrowser(api) : undefined;
+interface Connection {
+  clientId: string;
+  auth: SpotifyAuth;
+  api: SpotifyClient;
+  browser: SpotifyBrowser;
+}
+
+export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetchImpl: typeof fetch = fetch): http.Server {
+  let savedClientId = saved?.clientId;
+  let connection: Connection | undefined;
+
+  // A Client ID saved from Settings wins; the env var is the fallback; with neither
+  // the source stays hidden.
+  const connect = () => {
+    const clientId = savedClientId ?? config.clientId;
+    if (!clientId) {
+      connection = undefined;
+      return;
+    }
+    const auth = new SpotifyAuth(clientId, config.tokenPath, fetchImpl);
+    const api = new SpotifyClient(auth, fetchImpl);
+    connection = { clientId, auth, api, browser: new SpotifyBrowser(api) };
+  };
+  connect();
+
+  const clientStatus = (): SpotifyClientStatus => ({
+    source: savedClientId ? "saved" : config.clientId ? "env" : "none",
+    clientId: savedClientId ?? config.clientId,
+    envConfigured: Boolean(config.clientId)
+  });
+
+  // A sign-in belongs to the app that issued it, so switching apps signs out.
+  const useClientId = async (next: string | undefined) => {
+    const before = connection;
+    savedClientId = next;
+    if ((savedClientId ?? config.clientId) === before?.clientId) return;
+    await before?.auth.signOut();
+    connect();
+  };
 
   return http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
       if (request.method === "GET" && url.pathname === "/health") {
-        return sendJson(response, 200, { ok: true, service: config.serviceName, configured: Boolean(auth) });
+        return sendJson(response, 200, { ok: true, service: config.serviceName, configured: Boolean(connection) });
       }
+      if (request.method === "GET" && url.pathname === "/config") {
+        return sendJson(response, 200, clientStatus());
+      }
+      if (request.method === "POST" && url.pathname === "/config") {
+        const body = await readJson<{ clientId?: unknown }>(request);
+        const clientId = parseClientId(body.clientId);
+        if (!clientId) {
+          return sendJson(response, 400, { error: "That isn't a Client ID. It's 32 letters and digits, on your Spotify app's Settings page." });
+        }
+        await writeSavedClientId(config.clientIdPath, { clientId, savedAt: new Date().toISOString() });
+        await useClientId(clientId);
+        console.log("[spotify-smapi] saved Client ID from Settings");
+        return sendJson(response, 200, clientStatus());
+      }
+      if (request.method === "POST" && url.pathname === "/config/clear") {
+        await clearSavedClientId(config.clientIdPath);
+        await useClientId(undefined);
+        console.log("[spotify-smapi] saved Client ID cleared");
+        return sendJson(response, 200, clientStatus());
+      }
+      // Pinned per request, so a Client ID change mid-request can't mix apps.
+      const active = connection;
       // Answered even unconfigured, so Settings can explain the setup.
       if (request.method === "GET" && url.pathname === "/auth/status") {
-        if (!auth) return sendJson(response, 200, { configured: false, signedIn: false });
-        return sendJson(response, 200, { configured: true, ...(await auth.status()), redirectUri: config.redirectUri ?? null });
+        if (!active) return sendJson(response, 200, { configured: false, signedIn: false });
+        return sendJson(response, 200, { configured: true, ...(await active.auth.status()), redirectUri: config.redirectUri ?? null });
       }
       // Unconfigured, the bridge's /info probe fails and the source stays hidden.
-      if (!auth || !api || !browser) {
-        return sendJson(response, 503, { error: "Spotify is not configured: set MISONOS_SPOTIFY_CLIENT_ID" });
+      if (!active) {
+        return sendJson(response, 503, {
+          error: "Spotify is not configured: add your Spotify app's Client ID under Settings → Spotify, or set MISONOS_SPOTIFY_CLIENT_ID"
+        });
       }
+      const { auth, api, browser } = active;
       if (request.method === "GET" && url.pathname === "/info") {
         return sendJson(response, 200, {
           id: "spotify",
@@ -99,8 +160,15 @@ export function createServer(config: SpotifyConfig, fetchImpl: typeof fetch = fe
 function errorStatus(error: unknown): number {
   if (error instanceof SpotifyAuthError) return error.status;
   if (error instanceof SpotifyError) return error.status === 404 ? 404 : 502;
-  if (error instanceof IdError) return 400;
+  if (error instanceof IdError || error instanceof SyntaxError) return 400;
   return 502;
+}
+
+async function readJson<T>(request: http.IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(chunk as Buffer);
+  const raw = Buffer.concat(chunks).toString("utf8");
+  return (raw ? JSON.parse(raw) : {}) as T;
 }
 
 function sendJson(response: http.ServerResponse, status: number, payload: unknown): void {
