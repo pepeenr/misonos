@@ -17,6 +17,9 @@ export interface SonosZone {
   coordinatorId?: string;
   groupId?: string;
   visible: boolean;
+  // For a hidden member of a bonded room (the second half of a stereo pair, a Sub,
+  // home theater surrounds): the uuid of the visible member that stands for the room.
+  bondedTo?: string;
   // Sonos software generation: 1 = S1, 2 = S2. Parsed from the SWGen attribute
   // in ZoneGroupState (present on real players). Undefined until discovered.
   // Drives playback URI choice for SMAPI sources: S2 honors DIDL on plain-http

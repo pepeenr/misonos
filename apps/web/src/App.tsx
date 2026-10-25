@@ -2374,6 +2374,8 @@ function AboutSystem() {
                 <span>{device.displayName ?? device.modelName ?? "Sonos"}</span>
               </header>
               <dl>
+                {/* A bonded Sub names itself "Sub (S)", so say which room it plays in. */}
+                <Row label="Room" value={device.zoneName.startsWith(device.roomName) ? undefined : device.roomName} />
                 <Row label="Model" value={device.modelName} />
                 <Row label="Model #" value={device.modelNumber} />
                 <Row label="Serial" value={device.serialNumber} mono />

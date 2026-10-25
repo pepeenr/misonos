@@ -58,6 +58,21 @@ export function parseZoneGroupState(xml: string): { zones: SonosZone[]; groups: 
       groupZones.push(zone);
     }
 
+    // File each hidden member under its room: the visible member it's nested in as a
+    // <Satellite/>, or the visible member that shares its channel map (a stereo pair
+    // and its Sub list each other in ChannelMapSet, a home theater in HTSatChanMapSet).
+    const parents = satelliteParents(groupBlock);
+    const channelMaps = new Map(memberTags.map((tag) => [attrText(tag, "UUID") ?? attrText(tag, "Uuid") ?? "", channelMapMembers(tag)]));
+    for (const zone of groupZones) {
+      if (zone.visible) continue;
+      const room = groupZones.find((candidate) => candidate.visible && (
+        parents.get(zone.uuid) === candidate.uuid ||
+        channelMaps.get(candidate.uuid)?.includes(zone.uuid) ||
+        channelMaps.get(zone.uuid)?.includes(candidate.uuid)
+      ));
+      if (room) zone.bondedTo = room.uuid;
+    }
+
     const coordinator = groupZones.find((zone) => zone.uuid === coordinatorId) ?? groupZones[0];
     if (coordinator) {
       groups.push({
@@ -70,4 +85,28 @@ export function parseZoneGroupState(xml: string): { zones: SonosZone[]; groups: 
   }
 
   return { zones: [...zones.values()], groups };
+}
+
+// Satellite uuid → the uuid of the ZoneGroupMember container it's nested in. Walks the
+// tags in order, since a member is self-closing unless it holds satellites.
+function satelliteParents(groupBlock: string): Map<string, string> {
+  const parents = new Map<string, string>();
+  let container: string | undefined;
+  for (const [, closing, tagName, attributes, selfClosing] of groupBlock.matchAll(/<(\/?)(ZoneGroupMember|Satellite)\b([^>]*?)(\/?)>/gi)) {
+    if (closing) {
+      container = undefined;
+    } else if (tagName.toLowerCase() === "satellite") {
+      const uuid = attrText(attributes, "UUID");
+      if (uuid && container) parents.set(uuid, container);
+    } else if (!selfClosing) {
+      container = attrText(attributes, "UUID");
+    }
+  }
+  return parents;
+}
+
+// The uuids in a member's channel map, e.g. "RINCON_L:LF,LF;RINCON_R:RF,RF;RINCON_SUB:SW".
+function channelMapMembers(memberTag: string): string[] {
+  const maps = [attrText(memberTag, "ChannelMapSet"), attrText(memberTag, "HTSatChanMapSet")].filter(Boolean).join(";");
+  return maps.split(";").map((entry) => entry.split(":")[0]).filter(Boolean);
 }

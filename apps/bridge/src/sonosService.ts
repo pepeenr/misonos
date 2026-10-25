@@ -969,9 +969,19 @@ export class SonosService {
 
   async listDevices(): Promise<SonosDeviceInfo[]> {
     await this.snapshot();
-    const visible = [...this.zones.values()].filter((zone) => zone.visible);
-    const results = await Promise.all(visible.map((zone) => fetchDeviceInfo(zone)));
-    return results.sort((a, b) => a.zoneName.localeCompare(b.zoneName));
+    // Every speaker, hidden members of a bonded room included (the second half of a
+    // stereo pair, a Sub, surrounds), filed under that room after its main speaker.
+    const entries = await Promise.all([...this.zones.values()].map(async (zone) => {
+      const info = await fetchDeviceInfo(zone);
+      const room = zone.bondedTo ? this.zones.get(zone.bondedTo) : undefined;
+      return { info: room ? { ...info, roomName: room.name } : info, visible: zone.visible };
+    }));
+    return entries
+      .sort((a, b) =>
+        a.info.roomName.localeCompare(b.info.roomName) ||
+        Number(b.visible) - Number(a.visible) ||
+        a.info.zoneName.localeCompare(b.info.zoneName))
+      .map((entry) => entry.info);
   }
 
   async browseContainer(options: {
