@@ -1,4 +1,4 @@
-import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SpotifyAccountsView, SpotifyAuthStatus, TransportAction, VolumePayload, VolumeState } from "@misonos/sonos-protocol";
+import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, TransportAction, VolumePayload, VolumeState } from "@misonos/sonos-protocol";
 import { apiUrl } from "./servers.js";
 
 export interface AddPlaylistItemInput {
@@ -148,6 +148,15 @@ export const bridgeApi = {
   devices: () => request<SonosDeviceInfo[]>("/api/devices"),
   musicServices: () => request<MusicServiceDiscovery>("/api/music/services"),
   listSources: () => request<SourceDescriptor[]>("/api/sources"),
+  sourceSettings: () => request<SourceSetting[]>("/api/sources/settings"),
+  setSourceEnabled: (sourceId: string, enabled: boolean) =>
+    request<SourceSetting[]>(`/api/sources/${encodeURIComponent(sourceId)}/enabled`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  sourceLogin: (sourceId: string) =>
+    request<SourceLoginStatus>(`/api/sources/${encodeURIComponent(sourceId)}/config`),
+  saveSourceLogin: (sourceId: string, login: { serverUrl: string; username: string; password: string }) =>
+    request<SourceLoginStatus>(`/api/sources/${encodeURIComponent(sourceId)}/config`, { method: "POST", body: JSON.stringify(login) }),
+  clearSourceLogin: (sourceId: string) =>
+    request<SourceLoginStatus>(`/api/sources/${encodeURIComponent(sourceId)}/config/clear`, { method: "POST", body: "{}" }),
   browseSource: (sourceId: string, id?: string) => {
     const query = id ? `?id=${encodeURIComponent(id)}` : "";
     return request<SourceBrowseResponse>(`/api/sources/${encodeURIComponent(sourceId)}/browse${query}`);

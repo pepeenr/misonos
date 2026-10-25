@@ -80,15 +80,20 @@ export class SubsonicError extends Error {
   }
 }
 
+export function subsonicToken(password: string): { salt: string; token: string } {
+  const salt = randomBytes(8).toString("hex");
+  return { salt, token: createHash("md5").update(password + salt).digest("hex") };
+}
+
 export class SubsonicClient {
   constructor(private readonly server: NavidromeServer, private readonly fetchImpl: typeof fetch = fetch) {}
 
-  // Token auth (API 1.13+): a fresh salt per request and t = md5(password + salt),
-  // so the password itself never goes over the wire. These URLs still carry a
-  // replayable token — keep them inside this service, never hand them out.
+  // Token auth (API 1.13+): t = md5(password + salt), so the password itself never
+  // goes over the wire — a fresh salt per request when we have the password, the
+  // saved pair otherwise (Subsonic servers accept a reused salt). These URLs still
+  // carry a replayable token — keep them inside this service, never hand them out.
   url(endpoint: string, params: Params = {}): URL {
-    const salt = randomBytes(8).toString("hex");
-    const token = createHash("md5").update(this.server.password + salt).digest("hex");
+    const { salt, token } = "password" in this.server ? subsonicToken(this.server.password) : this.server;
     const url = new URL(`${this.server.serverUrl}/rest/${endpoint}`);
     url.searchParams.set("u", this.server.username);
     url.searchParams.set("t", token);
@@ -100,6 +105,11 @@ export class SubsonicClient {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
     return url;
+  }
+
+  // Checks the server answers and accepts the credentials (error code 40 if not).
+  async ping(): Promise<void> {
+    await this.get("ping");
   }
 
   async artists(): Promise<SubsonicArtist[]> {

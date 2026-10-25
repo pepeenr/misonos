@@ -643,8 +643,8 @@ export class SonosService {
     return fetchDeviceInfo(zone);
   }
 
-  listSources(): Promise<SourceDescriptor[]> {
-    return listSources();
+  listSources(disabled?: ReadonlySet<string>): Promise<SourceDescriptor[]> {
+    return listSources(disabled);
   }
 
   browseSource(sourceId: string, id?: string): Promise<SourceBrowseResponse> {
