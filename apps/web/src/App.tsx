@@ -16,7 +16,11 @@ import { useLocalPlayer, type LocalTrack } from "./localPlayer.js";
 import { ServiceIcon, SourcePicker } from "./SourcePicker.js";
 import { SpotifySettings } from "./SpotifySettings.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
-import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setPref } from "./prefs.js";
+import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
+import { pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
+import { PlaylistsPanel } from "./PlaylistsPanel.js";
+import { useKeyboardShortcuts } from "./shortcuts.js";
+import { ShortcutHelp } from "./ShortcutHelp.js";
 
 const GroupEditor = lazy(() => import("./GroupEditor.js").then((module) => ({ default: module.GroupEditor })));
 const LibraryView = lazy(() => import("./LibraryView.js").then((module) => ({ default: module.LibraryView })));
@@ -70,6 +74,10 @@ export function App() {
   const [showDevPanels, setShowDevPanels] = useState<boolean>(() => readLocalPref(SHOW_DEV_PANELS_PREF) ?? false);
   // Volume ceiling (0–100): the sliders span 0..maxVolume, so the controller can't go louder.
   const [maxVolume, setMaxVolume] = useState<number>(() => readLocalPref(MAX_VOLUME_PREF) ?? 100);
+  const [queueCollapsed, setQueueCollapsed] = useState<boolean>(() => readLocalPref(QUEUE_COLLAPSED_PREF) ?? false);
+  const [playlistsCollapsed, setPlaylistsCollapsed] = useState<boolean>(() => readLocalPref(PLAYLISTS_COLLAPSED_PREF) ?? false);
+  const [playlistsSourcePref, setPlaylistsSourcePref] = useState<string | null>(() => readLocalPref(PLAYLISTS_SOURCE_PREF));
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const dialogs = useDialogs();
   const favorites = useFavorites();
   const localPlayer = useLocalPlayer();
@@ -103,6 +111,9 @@ export function App() {
   }, []);
 
   useEffect(() => { void refreshCustomIcons(); }, [refreshCustomIcons]);
+
+  const playlistSources = usePlaylistSources(sourcesVersion);
+  const playlistSource = pickPlaylistSource(playlistSources, playlistsSourcePref);
 
   const displayGroups = useMemo(() => {
     const next = applyPendingGroupEdits(groups, pendingGroupEdits);
@@ -234,6 +245,9 @@ export function App() {
     });
     void loadPref(QUEUE_DRAG_REORDER_PREF).then((value) => {
       if (!cancelled && value !== null) setQueueDragReorder(value);
+    });
+    void loadPref(PLAYLISTS_SOURCE_PREF).then((value) => {
+      if (!cancelled && value !== null) setPlaylistsSourcePref(value);
     });
     return () => { cancelled = true; };
   }, []);
@@ -668,6 +682,59 @@ export function App() {
     ? `${selectedGroupOption?.name ?? "Group"} group`
     : selectedPrimaryZone?.name ?? "Selected room";
 
+  const toggleQueueCollapsed = () => {
+    setQueueCollapsed(!queueCollapsed);
+    setLocalPref(QUEUE_COLLAPSED_PREF, !queueCollapsed);
+  };
+  const togglePlaylistsCollapsed = () => {
+    setPlaylistsCollapsed(!playlistsCollapsed);
+    setLocalPref(PLAYLISTS_COLLAPSED_PREF, !playlistsCollapsed);
+  };
+  const onPlaylistPlayed = useCallback((next: NowPlaying) => {
+    setNowPlaying(next);
+    void loadQueue(next.groupId, true);
+  }, [loadQueue]);
+
+  // ←/→ seek from where the last press aimed while Sonos catches up, so quick presses add up.
+  const lastSeekRef = useRef<{ target: number; at: number } | null>(null);
+  const seekBy = (seconds: number) => {
+    const duration = effectiveProgress.durationSeconds;
+    if (view !== "main" || !transportEnabled || duration <= 0) return false;
+    const now = Date.now();
+    const recent = lastSeekRef.current && now - lastSeekRef.current.at < 1500 ? lastSeekRef.current.target : null;
+    const from = recent ?? (effectiveProgress.percent / 100) * duration;
+    const target = Math.max(0, Math.min(duration, Math.round(from + seconds)));
+    lastSeekRef.current = { target, at: now };
+    onSeekTo(target);
+  };
+  // G and Shift+G step through the rooms in the order the room menu lists them.
+  const cycleRoom = (step: number) => {
+    if (groupOptions.length < 2) return;
+    const index = groupOptions.findIndex((option) => option.id === selectedGroupOption?.id);
+    setSelectedGroupId(groupOptions[(index + step + groupOptions.length) % groupOptions.length].id);
+  };
+  // Keys for the on-screen controls live on the controls (aria-keyshortcuts); these
+  // are the ones with no single button. See SHORTCUT_GROUPS for the full list.
+  useKeyboardShortcuts({
+    ArrowLeft: () => seekBy(-10),
+    ArrowRight: () => seekBy(10),
+    "Shift+ArrowLeft": () => seekBy(-30),
+    "Shift+ArrowRight": () => seekBy(30),
+    G: () => cycleRoom(1),
+    "Shift+G": () => cycleRoom(-1),
+    "Shift+K": () => { void pauseAllGroups(); },
+    E: () => { if (view === "editor") return false; setView("editor"); },
+    A: () => { if (!artworkFullscreen) return false; setArtworkFullscreen(false); },
+    V: () => { if (!vuOpen) return false; setVuOpen(false); },
+    Escape: () => {
+      if (vuOpen) setVuOpen(false);
+      else if (artworkFullscreen) setArtworkFullscreen(false);
+      else if (volumePopoverOpen) setVolumePopoverOpen(false);
+      else return false;
+    },
+    "?": () => setShortcutsOpen(true)
+  });
+
   return (
     <main className="app-shell">
       <header className={`topbar ${view === "main" ? "compact main" : "compact"}`}>
@@ -685,20 +752,20 @@ export function App() {
               onOpen={() => { if (groups.length > 0) void loadGroupPlayback(groups); }}
             />
             <div className="topbar-actions">
-              <button className="icon-button" type="button" title="Browse music sources" aria-label="Browse music sources" onClick={() => setView("browse")}>
+              <button className="icon-button" type="button" title="Browse music sources (B)" aria-label="Browse music sources" aria-keyshortcuts="B" onClick={() => setView("browse")}>
                 <IconMusic size={18} />
               </button>
-              <button className="icon-button" type="button" title="Library (favorites & playlists)" aria-label="Library" onClick={() => setView("library")}>
+              <button className="icon-button" type="button" title="Library: favorites & playlists (L)" aria-label="Library" aria-keyshortcuts="L" onClick={() => setView("library")}>
                 <Library size={18} />
               </button>
-              <button className="icon-button" type="button" title="Settings" aria-label="Settings" onClick={() => setView("settings")}>
+              <button className="icon-button" type="button" title="Settings (,)" aria-label="Settings" aria-keyshortcuts="," onClick={() => setView("settings")}>
                 <Settings size={18} />
               </button>
             </div>
           </>
         ) : (
           <>
-            <button className="icon-button topbar-back" type="button" title="Back" aria-label="Back" onClick={() => setView("main")}>
+            <button className="icon-button topbar-back" type="button" title="Back (Esc)" aria-label="Back" aria-keyshortcuts="Escape" onClick={() => setView("main")}>
               <ArrowLeft size={18} />
             </button>
             <span className="topbar-title">{view === "settings" ? "Settings" : view === "browse" ? "Music" : view === "library" ? "Library" : "Group Editor"}</span>
@@ -786,6 +853,13 @@ export function App() {
               setPref(MAX_VOLUME_PREF, value);
             }}
             onMaxVolumeCommit={(value) => void enforceVolumeCap(value)}
+            playlistSources={playlistSources}
+            playlistsSource={playlistsSourcePref ?? playlistSource?.source.id ?? "off"}
+            onPlaylistsSourceChange={(value) => {
+              setPlaylistsSourcePref(value);
+              setPref(PLAYLISTS_SOURCE_PREF, value);
+            }}
+            onShowShortcuts={() => setShortcutsOpen(true)}
           />
           <SourceLogoSettings customIcons={customIcons} sourcesVersion={sourcesVersion} onChanged={() => void refreshCustomIcons()} />
           <Equalizer zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
@@ -838,6 +912,8 @@ export function App() {
               type="button"
               className="artwork-frame"
               aria-label="Expand album art"
+              aria-keyshortcuts="A"
+              title="Full-screen album art (A)"
               onClick={() => { setArtworkMetaOpen(true); setArtworkFullscreen(true); }}
             >
               {effectiveNowPlaying?.albumArtUri ? <img src={artSrc(effectiveNowPlaying.albumArtUri)} alt="" /> : (
@@ -853,7 +929,7 @@ export function App() {
               )}
             </button>
             {vuSupported ? (
-              <button type="button" className="artwork-vu" title="VU meter" aria-label="Open VU meter" onClick={() => setVuOpen(true)}>
+              <button type="button" className="artwork-vu" title="VU meter (V)" aria-label="Open VU meter" aria-keyshortcuts="V" onClick={() => setVuOpen(true)}>
                 <Gauge size={18} />
               </button>
             ) : null}
@@ -877,22 +953,23 @@ export function App() {
           </div>
           <div className="transport-bar">
             {!isLiveStream && (
-              <button className="icon-button large" type="button" title="Previous" aria-label="Previous" disabled={!transportEnabled} onClick={onPrevTrack}>
+              <button className="icon-button large" type="button" title="Previous (P)" aria-label="Previous" aria-keyshortcuts="P" disabled={!transportEnabled} onClick={onPrevTrack}>
                 <SkipBack size={22} />
               </button>
             )}
             <button
               className="icon-button large primary"
               type="button"
-              title={effectivePlaying ? "Pause" : "Play"}
+              title={effectivePlaying ? "Pause (K)" : "Play (K)"}
               aria-label={effectivePlaying ? "Pause" : "Play"}
+              aria-keyshortcuts="K Space"
               disabled={!transportEnabled}
               onClick={onPlayPause}
             >
               {effectivePlaying ? <Pause size={22} /> : <Play size={24} />}
             </button>
             {!isLiveStream && (
-              <button className="icon-button large" type="button" title="Next" aria-label="Next" disabled={!transportEnabled} onClick={onNextTrack}>
+              <button className="icon-button large" type="button" title="Next (N)" aria-label="Next" aria-keyshortcuts="N" disabled={!transportEnabled} onClick={onNextTrack}>
                 <SkipForward size={22} />
               </button>
             )}
@@ -904,8 +981,9 @@ export function App() {
                 <button
                   className={`icon-button mode${activeItemFavorited ? " active" : ""}`}
                   type="button"
-                  title={activeItemFavorited ? "Remove favorite" : "Add favorite"}
+                  title={activeItemFavorited ? "Remove favorite (F)" : "Add favorite (F)"}
                   aria-label="Toggle favorite"
+                  aria-keyshortcuts="F"
                   disabled={!activeItemPinnable}
                   onClick={() => activeQueueItem && void toggleQueueFavorite(activeQueueItem, true)}
                 >
@@ -914,8 +992,9 @@ export function App() {
                 <button
                   className={`icon-button mode${activeItemPreset ? " active" : ""}`}
                   type="button"
-                  title={activeItemPreset ? "Remove preset" : "Save as preset"}
+                  title={activeItemPreset ? "Remove preset (Shift+F)" : "Save as preset (Shift+F)"}
                   aria-label="Toggle preset"
+                  aria-keyshortcuts="Shift+F"
                   disabled={!activeItemPinnable}
                   onClick={() => activeQueueItem && void toggleQueuePreset(activeQueueItem)}
                 >
@@ -927,8 +1006,9 @@ export function App() {
                 <button
                   className={`icon-button mode${nowPlaying?.repeat && nowPlaying.repeat !== "none" ? " active" : ""}`}
                   type="button"
-                  title={nowPlaying?.repeat === "one" ? "Repeat one" : nowPlaying?.repeat === "all" ? "Repeat all" : "Repeat off"}
+                  title={`${nowPlaying?.repeat === "one" ? "Repeat one" : nowPlaying?.repeat === "all" ? "Repeat all" : "Repeat off"} (R)`}
                   aria-label="Cycle repeat mode"
+                  aria-keyshortcuts="R"
                   disabled={!selectedGroup}
                   onClick={() => void cycleRepeat()}
                 >
@@ -937,8 +1017,9 @@ export function App() {
                 <button
                   className={`icon-button mode${nowPlaying?.shuffle ? " active" : ""}`}
                   type="button"
-                  title={nowPlaying?.shuffle ? "Shuffle on" : "Shuffle off"}
+                  title={nowPlaying?.shuffle ? "Shuffle on (S)" : "Shuffle off (S)"}
                   aria-label="Toggle shuffle"
+                  aria-keyshortcuts="S"
                   disabled={!selectedGroup}
                   onClick={() => void toggleShuffle()}
                 >
@@ -947,8 +1028,9 @@ export function App() {
                 <button
                   className={`icon-button mode${nowPlaying?.crossfade ? " active" : ""}`}
                   type="button"
-                  title={nowPlaying?.crossfade ? "Crossfade on" : "Crossfade off"}
+                  title={nowPlaying?.crossfade ? "Crossfade on (C)" : "Crossfade off (C)"}
                   aria-label="Toggle crossfade"
+                  aria-keyshortcuts="C"
                   disabled={!selectedGroup}
                   onClick={() => void toggleCrossfade()}
                 >
@@ -972,6 +1054,7 @@ export function App() {
               disabled={localMode ? !localPlayer.active : !primaryVolume}
               onChange={onPrimaryVolume}
               onMute={onPrimaryMute}
+              shortcuts
               swallowFirstAdjustment={!localMode && selectedVisibleZones.length > 1 && !volumePopoverOpen}
               onSliderPointerDown={() => {
                 if (!localMode && selectedVisibleZones.length > 1) setVolumePopoverOpen(true);
@@ -1008,15 +1091,17 @@ export function App() {
           <section className="presets-panel" aria-label="Radio presets">
             <div className="section-heading"><h2>Presets</h2></div>
             <div className="presets-grid">
-              {favorites.presets.map((preset) => {
+              {favorites.presets.map((preset, index) => {
                 const playing = !!activeQueueItem?.sourceId && activeQueueItem.sourceId === preset.sourceId && activeQueueItem.trackId === preset.itemId;
+                const shortcut = index < 9 ? `Shift+${index + 1}` : undefined;
                 return (
                   <button
                     key={`${preset.sourceId}:${preset.itemId}`}
                     type="button"
                     className={`preset-tile${playing ? " active" : ""}`}
-                    title={`Tune in ${preset.title}`}
+                    title={`Tune in ${preset.title}${shortcut ? ` (${shortcut})` : ""}`}
                     aria-label={`Tune in ${preset.title}`}
+                    aria-keyshortcuts={shortcut}
                     disabled={!selectedGroup}
                     onClick={() => void playPreset(preset)}
                   >
@@ -1033,14 +1118,27 @@ export function App() {
 
         {!isLiveStream && (
         <section className="queue-panel" aria-label="Queue">
-          <div className="section-heading">
-            <h2>Queue</h2>
+          <div className={queueCollapsed ? "section-heading collapsed" : "section-heading"}>
+            <h2>
+              <button
+                type="button"
+                className="section-toggle"
+                aria-expanded={!queueCollapsed}
+                aria-keyshortcuts="Q"
+                title={queueCollapsed ? "Show the queue (Q)" : "Hide the queue (Q)"}
+                onClick={toggleQueueCollapsed}
+              >
+                <ChevronDown size={16} className="section-toggle-icon" aria-hidden="true" />
+                Queue
+              </button>
+            </h2>
             <div className="heading-actions">
               <button
                 className="icon-button compact"
                 type="button"
-                title="Save queue as playlist"
+                title="Save queue as playlist (Shift+Q)"
                 aria-label="Save queue as playlist"
+                aria-keyshortcuts="Shift+Q"
                 disabled={effectiveQueue.length === 0 || localMode || !selectedGroup}
                 onClick={() => void saveQueueAsPlaylist()}
               >
@@ -1049,8 +1147,9 @@ export function App() {
               <button
                 className="icon-button compact"
                 type="button"
-                title="Clear queue"
+                title="Clear queue (Shift+Delete)"
                 aria-label="Clear queue"
+                aria-keyshortcuts="Shift+Delete Shift+Backspace"
                 disabled={effectiveQueue.length === 0 || (!localMode && !selectedGroup)}
                 onClick={() => void clearQueueItems()}
               >
@@ -1059,7 +1158,7 @@ export function App() {
               <span>{effectiveQueue.length}</span>
             </div>
           </div>
-          {!localMode && queueState === "loading" ? (
+          {queueCollapsed ? null : !localMode && queueState === "loading" ? (
             <div className="empty-panel">Loading queue...</div>
           ) : !localMode && queueState === "error" ? (
             <div className="empty-panel error-panel">
@@ -1083,6 +1182,19 @@ export function App() {
           )}
         </section>
         )}
+
+        {playlistSource ? (
+          <PlaylistsPanel
+            key={`${playlistSource.source.id}:${playlistSource.folderId}`}
+            entry={playlistSource}
+            groupId={selectedGroup?.id}
+            localMode={localMode}
+            collapsed={playlistsCollapsed}
+            onToggleCollapsed={togglePlaylistsCollapsed}
+            onPlayed={onPlaylistPlayed}
+            customIcons={customIcons}
+          />
+        ) : null}
       </section>
       ) : null}
       {artworkFullscreen && nowPlaying?.albumArtUri ? (
@@ -1133,6 +1245,7 @@ export function App() {
           onClose={() => setVuOpen(false)}
         />
       ) : null}
+      {shortcutsOpen ? <ShortcutHelp onClose={() => setShortcutsOpen(false)} /> : null}
     </main>
   );
 }
@@ -1548,6 +1661,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder={`Search ${activeSource?.name ?? ""}`}
+              aria-keyshortcuts="/"
               enterKeyHint="search"
             />
             {searchActive ? (
@@ -2464,9 +2578,17 @@ interface PreferencesProps {
   maxVolume: number;
   onMaxVolumeChange: (value: number) => void;
   onMaxVolumeCommit: (value: number) => void;
+  /** Sources with a Playlists folder; null while they're being looked up. */
+  playlistSources: PlaylistSource[] | null;
+  /** A source id or "off". */
+  playlistsSource: string;
+  onPlaylistsSourceChange: (value: string) => void;
+  onShowShortcuts: () => void;
 }
 
-function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChromeChange, queueDragReorder, onQueueDragReorderChange, maxVolume, onMaxVolumeChange, onMaxVolumeCommit }: PreferencesProps) {
+function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChromeChange, queueDragReorder, onQueueDragReorderChange, maxVolume, onMaxVolumeChange, onMaxVolumeCommit, playlistSources, playlistsSource, onPlaylistsSourceChange, onShowShortcuts }: PreferencesProps) {
+  // Keep a picked source listed while it's away (signed out, switched off).
+  const playlistsSourceMissing = playlistsSource !== "off" && !!playlistSources && !playlistSources.some((entry) => entry.source.id === playlistsSource);
   return (
     <section className="queue-panel" aria-label="Preferences">
       <div className="section-heading">
@@ -2491,6 +2613,22 @@ function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChrom
           />
           <output>{maxVolume}</output>
         </span>
+      </label>
+      <label className="pref-row">
+        <span className="pref-label">
+          <strong>Playlists on the main screen</strong>
+          <small>Shows this source&rsquo;s playlists as a grid under the queue. Tap one to play it.</small>
+        </span>
+        <select
+          className="pref-select"
+          value={playlistsSource}
+          disabled={!playlistSources}
+          onChange={(event) => onPlaylistsSourceChange(event.target.value)}
+        >
+          <option value="off">Off</option>
+          {playlistSources?.map((entry) => <option key={entry.source.id} value={entry.source.id}>{entry.source.name}</option>)}
+          {playlistsSourceMissing ? <option value={playlistsSource}>{playlistsSource} (not available)</option> : null}
+        </select>
       </label>
       <label className="pref-row">
         <span className="pref-label">
@@ -2528,6 +2666,13 @@ function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChrom
           onChange={(event) => onShowDevPanelsChange(event.target.checked)}
         />
       </label>
+      <div className="pref-row">
+        <span className="pref-label">
+          <strong>Keyboard shortcuts</strong>
+          <small>Every control on the main screen has a key. Press ? anywhere to list them.</small>
+        </span>
+        <button type="button" className="pref-button" onClick={onShowShortcuts}>Show</button>
+      </div>
     </section>
   );
 }
@@ -3158,6 +3303,8 @@ function SleepTimer({ remainingSeconds, disabled, onSet }: SleepTimerProps) {
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLUListElement | null>(null);
   const active = (remainingSeconds ?? 0) > 0;
   // Which option shows a check: the one the user picked while active, or "Off" when the
   // timer is off. (Remaining decreases, so we can't infer the original preset after the fact.)
@@ -3168,8 +3315,26 @@ function SleepTimer({ remainingSeconds, disabled, onSet }: SleepTimerProps) {
     const onClick = (event: MouseEvent) => {
       if (!ref.current?.contains(event.target as Node)) setOpen(false);
     };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
     document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // The open menu takes focus on the checked option, so the keyboard (T, then ↑/↓
+  // and Enter) can pick a time.
+  useEffect(() => {
+    if (!open) return;
+    const menu = menuRef.current;
+    (menu?.querySelector<HTMLButtonElement>("button.selected") ?? menu?.querySelector<HTMLButtonElement>("button"))?.focus();
   }, [open]);
 
   // Drop the remembered pick when the timer turns off (so "Off" reads as selected).
@@ -3180,10 +3345,12 @@ function SleepTimer({ remainingSeconds, disabled, onSet }: SleepTimerProps) {
   return (
     <div className="sleep-timer" ref={ref}>
       <button
+        ref={triggerRef}
         className={`icon-button mode${active ? " active labeled" : ""}`}
         type="button"
-        title={active ? `Sleep timer: ${Math.ceil((remainingSeconds ?? 0) / 60)} min left` : "Sleep timer"}
+        title={`${active ? `Sleep timer: ${Math.ceil((remainingSeconds ?? 0) / 60)} min left` : "Sleep timer"} (T)`}
         aria-label="Sleep timer"
+        aria-keyshortcuts="T"
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
@@ -3194,7 +3361,18 @@ function SleepTimer({ remainingSeconds, disabled, onSet }: SleepTimerProps) {
           : <Moon size={16} />}
       </button>
       {open ? (
-        <ul className="sleep-timer-menu" role="menu">
+        <ul
+          ref={menuRef}
+          className="sleep-timer-menu"
+          role="menu"
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+            event.preventDefault();
+            const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+            const index = items.indexOf(document.activeElement as HTMLButtonElement);
+            items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+          }}
+        >
           {SLEEP_TIMER_OPTIONS.map((option) => {
             const selected = option.seconds === checkedSeconds;
             return (
@@ -3302,13 +3480,15 @@ interface VolumeControlProps {
   onMute: () => void;
   onSliderPointerDown?: () => void;
   swallowFirstAdjustment?: boolean;
+  /** Bind M and ↑/↓ to this control: only the main volume, not the per-room ones. */
+  shortcuts?: boolean;
 }
 
 // How long after a −/+ tap the next one builds on the value it sent, rather than on
 // the device volume, which confirms each change with a lag.
 const VOLUME_STEP_WINDOW_MS = 1500;
 
-function VolumeControl({ label, value, muted, maxVolume = 100, disabled = false, onChange, onMute, onSliderPointerDown, swallowFirstAdjustment = false }: VolumeControlProps) {
+function VolumeControl({ label, value, muted, maxVolume = 100, disabled = false, onChange, onMute, onSliderPointerDown, swallowFirstAdjustment = false, shortcuts = false }: VolumeControlProps) {
   const ignoreUntilRelease = useRef(false);
   const dragging = useRef(false);
   const lastStep = useRef<{ volume: number; at: number } | null>(null);
@@ -3339,10 +3519,10 @@ function VolumeControl({ label, value, muted, maxVolume = 100, disabled = false,
 
   return (
     <div className="volume-control">
-      <button className={muted ? "icon-button muted" : "icon-button"} type="button" title={muted ? "Unmute" : "Mute"} aria-label={`${muted ? "Unmute" : "Mute"} ${label}`} disabled={disabled} onClick={() => void onMute()}>
+      <button className={muted ? "icon-button muted" : "icon-button"} type="button" title={`${muted ? "Unmute" : "Mute"}${shortcuts ? " (M)" : ""}`} aria-label={`${muted ? "Unmute" : "Mute"} ${label}`} aria-keyshortcuts={shortcuts ? "M" : undefined} disabled={disabled} onClick={() => void onMute()}>
         {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
       </button>
-      <button className="icon-button compact volume-step" type="button" title="Volume down" aria-label={`Lower ${label} volume`} disabled={disabled || committed <= 0} onClick={() => step(-1)}>
+      <button className="icon-button compact volume-step" type="button" title={shortcuts ? "Volume down (↓)" : "Volume down"} aria-label={`Lower ${label} volume`} aria-keyshortcuts={shortcuts ? "ArrowDown" : undefined} disabled={disabled || committed <= 0} onClick={() => step(-1)}>
         <Minus size={15} />
       </button>
       <div className="scrub-wrap">
@@ -3375,7 +3555,7 @@ function VolumeControl({ label, value, muted, maxVolume = 100, disabled = false,
           <span className="scrub-bubble" style={{ left: `${maxVolume > 0 ? (displayValue / maxVolume) * 100 : 0}%` }}>{displayValue}</span>
         )}
       </div>
-      <button className="icon-button compact volume-step" type="button" title="Volume up" aria-label={`Raise ${label} volume`} disabled={disabled || committed >= maxVolume} onClick={() => step(1)}>
+      <button className="icon-button compact volume-step" type="button" title={shortcuts ? "Volume up (↑)" : "Volume up"} aria-label={`Raise ${label} volume`} aria-keyshortcuts={shortcuts ? "ArrowUp" : undefined} disabled={disabled || committed >= maxVolume} onClick={() => step(1)}>
         <Plus size={15} />
       </button>
       {/* Keep showing the committed volume here while dragging — the target lives

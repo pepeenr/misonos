@@ -36,3 +36,14 @@ if (typeof globalThis.DOMMatrixReadOnly === "undefined") {
     m22 = 1;
   } as unknown as typeof DOMMatrixReadOnly;
 }
+
+// The local player unlocks audio on the first key press or tap by playing a silent
+// clip from an object URL. jsdom has no object URLs, and its media elements don't
+// play (play() returns nothing instead of a promise).
+if (typeof URL.createObjectURL !== "function") {
+  URL.createObjectURL = () => "blob:jsdom";
+}
+if (typeof window !== "undefined") {
+  Object.defineProperty(HTMLMediaElement.prototype, "play", { configurable: true, value: () => Promise.resolve() });
+  Object.defineProperty(HTMLMediaElement.prototype, "pause", { configurable: true, value: () => undefined });
+}

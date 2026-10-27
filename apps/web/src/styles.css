@@ -309,7 +309,7 @@ button {
 
 .controller-grid.main-view {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "now" "presets" "queue";
+  grid-template-areas: "now" "presets" "queue" "playlists";
 }
 
 /* Global restore nudge: shown under the header in any view (main, library, …). */
@@ -1613,6 +1613,84 @@ h2 {
   -webkit-line-clamp: 2;
 }
 
+.queue-panel.playlists-panel {
+  grid-area: playlists;
+}
+
+.playlists-body {
+  display: grid;
+  gap: 10px;
+}
+
+.section-heading .playlists-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #aeb4ad;
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.playlists-grid {
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+}
+
+/* The full list scrolls inside the card, like the queue. */
+.playlists-grid.all {
+  max-height: 62vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+@media (max-width: 640px) {
+  .playlists-grid {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 8px;
+  }
+}
+
+.playlist-tile img,
+.playlist-tile .preset-tile-fallback {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.playlist-tile .preset-tile-fallback {
+  font-size: 1.4rem;
+}
+
+/* While one playlist starts, the others are disabled (dimmed); the one starting stays bright. */
+.playlist-tile.busy:disabled {
+  opacity: 1;
+  border-color: #91d3c4;
+}
+
+.playlist-tile.busy img,
+.playlist-tile.busy .preset-tile-fallback {
+  animation: playlist-starting 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes playlist-starting {
+  from { opacity: 1; }
+  to { opacity: 0.45; }
+}
+
+.playlists-more {
+  justify-self: center;
+  border: 1px solid rgba(242, 240, 232, 0.16);
+  border-radius: 8px;
+  padding: 6px 12px;
+  color: #d7d2c4;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.playlists-more:hover {
+  border-color: rgba(145, 211, 196, 0.5);
+}
+
 .group-editor-panel {
   grid-area: editor;
   padding: 14px;
@@ -1800,6 +1878,43 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* A card title that collapses its card (the queue, the playlists). */
+.section-heading.collapsed {
+  margin-bottom: 0;
+}
+
+.section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 3px 8px 3px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.section-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.section-toggle:focus-visible {
+  outline: 2px solid #91d3c4;
+  outline-offset: 1px;
+}
+
+.section-toggle-icon {
+  flex: none;
+  transition: transform 0.15s ease;
+}
+
+.section-toggle[aria-expanded="false"] .section-toggle-icon {
+  transform: rotate(-90deg);
 }
 
 .heading-leading {
@@ -2620,6 +2735,28 @@ small {
   gap: 8px;
 }
 
+.pref-select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #1c1f1e;
+  color: #f2f0e8;
+  border: 1px solid rgba(242, 240, 232, 0.16);
+  font: inherit;
+}
+
+.pref-button {
+  flex: none;
+  border: 1px solid rgba(242, 240, 232, 0.16);
+  border-radius: 8px;
+  padding: 7px 12px;
+  color: #f2f0e8;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
 .pref-row input[type="checkbox"] {
   width: 20px;
   height: 20px;
@@ -3324,4 +3461,80 @@ small {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Keyboard shortcut list */
+.eq-modal.shortcut-help {
+  width: min(680px, 100%);
+}
+
+.shortcut-help-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.shortcut-help:focus {
+  outline: none;
+}
+
+.shortcut-help-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 6px 24px;
+}
+
+.shortcut-help-groups h3 {
+  margin: 10px 0 6px;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #91d3c4;
+}
+
+.shortcut-help-groups dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: 9.5em minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.86rem;
+}
+
+.shortcut-row dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.shortcut-row dd {
+  margin: 0;
+  color: #d7d2c4;
+}
+
+.shortcut-or {
+  color: #9aa39f;
+  font-size: 0.78rem;
+}
+
+.shortcut-help kbd {
+  min-width: 1.6em;
+  padding: 1px 6px;
+  border: 1px solid rgba(242, 240, 232, 0.22);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f0e8;
+  font-family: inherit;
+  font-size: 0.8rem;
+  text-align: center;
+  white-space: nowrap;
 }
