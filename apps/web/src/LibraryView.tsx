@@ -4,6 +4,7 @@ import type { Favorite, Playlist, PlaylistItem, PlaybackMode, RecentlyPlayedItem
 import { artSrc, bridgeApi } from "./api.js";
 import { GroupDropdown } from "./GroupDropdown.js";
 import { buildGroupOptions } from "./groupPalette.js";
+import { useGroupColors } from "./groupColors.js";
 import { useDialogs } from "./dialogs.js";
 import { useFavorites, type FavoriteInput } from "./favorites.js";
 import { ServiceIcon } from "./SourcePicker.js";
@@ -41,7 +42,8 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup }: LibraryV
     return next;
   });
 
-  const groupOptions = buildGroupOptions(groups);
+  const groupColors = useGroupColors();
+  const groupOptions = buildGroupOptions(groups, groupColors);
   const selectedGroupOption = groupOptions.find((option) => option.id === selectedGroupId) ?? groupOptions[0];
   // Recent queues are keyed by the coordinator's stable zone UUID (the queue lives on
   // the coordinator and follows it through grouping).
