@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
 import { DialogProvider } from "./dialogs.js";
@@ -41,6 +41,49 @@ describe("App", () => {
     expect(await screen.findByText(/^(Mint|Amber|Sky|Coral|Lilac|Lime|Pink|Olive)$/)).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Song" })).toBeInTheDocument();
     expect(await screen.findByRole("slider", { name: "Playback progress (drag to seek)" })).toBeInTheDocument();
+  });
+
+  it("collapses the queue and plays a playlist from the grid, by click or key", async () => {
+    window.localStorage.clear();
+    const plays: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
+      if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
+      if (url.endsWith("/api/sources")) return json([{ id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] }]);
+      if (url.endsWith("/api/sources/navidrome/browse")) {
+        return json({ id: "root", total: 2, items: [{ id: "artists", title: "Artists", kind: "container" }, { id: "playlists", title: "Playlists", kind: "container" }] });
+      }
+      if (url.endsWith("/browse?id=playlists")) return json({ id: "playlists", total: 1, items: [{ id: "pl:1", title: "Road Trip", kind: "album" }] });
+      if (url.endsWith("/browse?id=pl%3A1")) {
+        return json({ id: "pl:1", total: 2, items: [{ id: "t1", title: "One", kind: "playable" }, { id: "t2", title: "Two", kind: "playable" }] });
+      }
+      if (url.endsWith("/api/sources/navidrome/play")) {
+        plays.push(JSON.parse(String(init?.body)));
+        return json({ groupId: "g1", state: "PLAYING", title: "One", updatedAt: new Date().toISOString() });
+      }
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", position: "0:01:07", duration: "0:04:04", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([{ id: "q1", title: "Song" }]);
+      return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
+    }));
+    const { container } = render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    const tile = await screen.findByRole("button", { name: "Play Road Trip" });
+    expect(tile).toHaveAttribute("aria-keyshortcuts", "1");
+    await waitFor(() => expect(container.querySelector(".queue-list")).not.toBeNull());
+
+    const queueToggle = screen.getByRole("button", { name: "Queue" });
+    fireEvent.click(queueToggle);
+    expect(queueToggle).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelector(".queue-list")).toBeNull();
+    fireEvent.keyDown(document.body, { key: "q" });
+    expect(queueToggle).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(tile);
+    await waitFor(() => expect(plays).toHaveLength(1));
+    expect(plays[0]).toMatchObject({ trackIds: ["t1", "t2"], groupId: "g1", mode: "replace" });
+    await waitFor(() => expect(tile).not.toBeDisabled());
+    fireEvent.keyDown(document.body, { key: "1", code: "Digit1" });
+    await waitFor(() => expect(plays).toHaveLength(2));
   });
 });
 

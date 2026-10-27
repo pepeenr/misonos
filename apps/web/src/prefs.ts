@@ -43,6 +43,13 @@ export const QUEUE_DRAG_REORDER_PREF = boolPref("queueDragReorder", "misonos:que
 // Caps how high the volume sliders can go (0–100). The slider keeps its full width
 // but represents 0..maxVolume, so the controller never sends a higher value.
 export const MAX_VOLUME_PREF = numberPref("maxVolume", "misonos:maxVolume");
+// Which source's playlists the main screen shows as a grid: a source id, "off", or
+// unset (the first source that has playlists).
+export const PLAYLISTS_SOURCE_PREF = stringPref("playlistsSourceId", "misonos:playlistsSourceId");
+// Collapsed main-screen cards. Per device (setLocalPref): a phone may hide the queue
+// that a desktop keeps open.
+export const QUEUE_COLLAPSED_PREF = boolPref("queueCollapsed", "misonos:queueCollapsed");
+export const PLAYLISTS_COLLAPSED_PREF = boolPref("playlistsCollapsed", "misonos:playlistsCollapsed");
 
 export function readLocalPref<T>(pref: PrefDef<T>): T | null {
   if (typeof window === "undefined") return null;
@@ -52,6 +59,11 @@ export function readLocalPref<T>(pref: PrefDef<T>): T | null {
   } catch {
     return null;
   }
+}
+
+/** Write to this device's cache only, never to the shared bridge store. */
+export function setLocalPref<T>(pref: PrefDef<T>, value: T): void {
+  writeLocalPref(pref, value);
 }
 
 function writeLocalPref<T>(pref: PrefDef<T>, value: T): void {
