@@ -50,6 +50,22 @@ export const PLAYLISTS_SOURCE_PREF = stringPref("playlistsSourceId", "misonos:pl
 // that a desktop keeps open.
 export const QUEUE_COLLAPSED_PREF = boolPref("queueCollapsed", "misonos:queueCollapsed");
 export const PLAYLISTS_COLLAPSED_PREF = boolPref("playlistsCollapsed", "misonos:playlistsCollapsed");
+// Colors picked for groups (Group Editor → a group's settings): coordinator id →
+// palette color name. Shared, so every device shows a group in the same color.
+export const GROUP_COLORS_PREF: PrefDef<Record<string, string>> = {
+  bridgeKey: "groupColors",
+  localKey: "misonos:groupColors",
+  decode: (raw) => {
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+      return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+    } catch {
+      return null;
+    }
+  },
+  encode: (value) => JSON.stringify(value)
+};
 
 export function readLocalPref<T>(pref: PrefDef<T>): T | null {
   if (typeof window === "undefined") return null;

@@ -16,6 +16,7 @@ import { useLocalPlayer, type LocalTrack } from "./localPlayer.js";
 import { ServiceIcon, SourcePicker } from "./SourcePicker.js";
 import { SpotifySettings } from "./SpotifySettings.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
+import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
 import { pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
@@ -81,6 +82,7 @@ export function App() {
   const dialogs = useDialogs();
   const favorites = useFavorites();
   const localPlayer = useLocalPlayer();
+  const groupColors = useGroupColors();
   // "This device" is a synthetic Play-to target: when selected, playback/now-playing/
   // queue/volume route to the in-browser player instead of a Sonos group.
   const localMode = selectedGroupId === LOCAL_DEVICE_ID;
@@ -675,7 +677,7 @@ export function App() {
     enqueueGroupEdit({ id: randomEditId(), type: "join", zoneId, groupId });
   };
 
-  const groupOptions = [...buildGroupOptions(displayGroups), DEVICE_OPTION];
+  const groupOptions = [...buildGroupOptions(displayGroups, groupColors), DEVICE_OPTION];
   const selectedGroupOption = groupOptions.find((option) => option.id === (selectedGroupId || selectedGroup?.id)) ?? groupOptions[0];
   const targetPlayback = { ...groupPlayback, [LOCAL_DEVICE_ID]: (localPlayer.playing ? "PLAYING" : "PAUSED_PLAYBACK") as PlaybackState };
   const primaryVolumeLabel = selectedGroup && selectedVisibleZones.length > 1
@@ -951,100 +953,102 @@ export function App() {
               />
             )}
           </div>
-          <div className="transport-bar">
-            {!isLiveStream && (
-              <button className="icon-button large" type="button" title="Previous (P)" aria-label="Previous" aria-keyshortcuts="P" disabled={!transportEnabled} onClick={onPrevTrack}>
-                <SkipBack size={22} />
+          <div className="transport-row">
+            <div className="transport-bar">
+              {!isLiveStream && (
+                <button className="icon-button large" type="button" title="Previous (P)" aria-label="Previous" aria-keyshortcuts="P" disabled={!transportEnabled} onClick={onPrevTrack}>
+                  <SkipBack size={22} />
+                </button>
+              )}
+              <button
+                className="icon-button large primary"
+                type="button"
+                title={effectivePlaying ? "Pause (K)" : "Play (K)"}
+                aria-label={effectivePlaying ? "Pause" : "Play"}
+                aria-keyshortcuts="K Space"
+                disabled={!transportEnabled}
+                onClick={onPlayPause}
+              >
+                {effectivePlaying ? <Pause size={22} /> : <Play size={24} />}
               </button>
-            )}
-            <button
-              className="icon-button large primary"
-              type="button"
-              title={effectivePlaying ? "Pause (K)" : "Play (K)"}
-              aria-label={effectivePlaying ? "Pause" : "Play"}
-              aria-keyshortcuts="K Space"
-              disabled={!transportEnabled}
-              onClick={onPlayPause}
-            >
-              {effectivePlaying ? <Pause size={22} /> : <Play size={24} />}
-            </button>
-            {!isLiveStream && (
-              <button className="icon-button large" type="button" title="Next (N)" aria-label="Next" aria-keyshortcuts="N" disabled={!transportEnabled} onClick={onNextTrack}>
-                <SkipForward size={22} />
-              </button>
-            )}
+              {!isLiveStream && (
+                <button className="icon-button large" type="button" title="Next (N)" aria-label="Next" aria-keyshortcuts="N" disabled={!transportEnabled} onClick={onNextTrack}>
+                  <SkipForward size={22} />
+                </button>
+              )}
+            </div>
+            {!localMode ? (
+            <div className="transport-modes">
+              {isLiveStream ? (
+                <>
+                  <button
+                    className={`icon-button mode${activeItemFavorited ? " active" : ""}`}
+                    type="button"
+                    title={activeItemFavorited ? "Remove favorite (F)" : "Add favorite (F)"}
+                    aria-label="Toggle favorite"
+                    aria-keyshortcuts="F"
+                    disabled={!activeItemPinnable}
+                    onClick={() => activeQueueItem && void toggleQueueFavorite(activeQueueItem, true)}
+                  >
+                    <Heart size={16} fill={activeItemFavorited ? "currentColor" : "none"} />
+                  </button>
+                  <button
+                    className={`icon-button mode${activeItemPreset ? " active" : ""}`}
+                    type="button"
+                    title={activeItemPreset ? "Remove preset (Shift+F)" : "Save as preset (Shift+F)"}
+                    aria-label="Toggle preset"
+                    aria-keyshortcuts="Shift+F"
+                    disabled={!activeItemPinnable}
+                    onClick={() => activeQueueItem && void toggleQueuePreset(activeQueueItem)}
+                  >
+                    <Star size={16} fill={activeItemPreset ? "currentColor" : "none"} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className={`icon-button mode${nowPlaying?.repeat && nowPlaying.repeat !== "none" ? " active" : ""}`}
+                    type="button"
+                    title={`${nowPlaying?.repeat === "one" ? "Repeat one" : nowPlaying?.repeat === "all" ? "Repeat all" : "Repeat off"} (R)`}
+                    aria-label="Cycle repeat mode"
+                    aria-keyshortcuts="R"
+                    disabled={!selectedGroup}
+                    onClick={() => void cycleRepeat()}
+                  >
+                    {nowPlaying?.repeat === "one" ? <Repeat1 size={16} /> : <Repeat size={16} />}
+                  </button>
+                  <button
+                    className={`icon-button mode${nowPlaying?.shuffle ? " active" : ""}`}
+                    type="button"
+                    title={nowPlaying?.shuffle ? "Shuffle on (S)" : "Shuffle off (S)"}
+                    aria-label="Toggle shuffle"
+                    aria-keyshortcuts="S"
+                    disabled={!selectedGroup}
+                    onClick={() => void toggleShuffle()}
+                  >
+                    <Shuffle size={16} />
+                  </button>
+                  <button
+                    className={`icon-button mode${nowPlaying?.crossfade ? " active" : ""}`}
+                    type="button"
+                    title={nowPlaying?.crossfade ? "Crossfade on (C)" : "Crossfade off (C)"}
+                    aria-label="Toggle crossfade"
+                    aria-keyshortcuts="C"
+                    disabled={!selectedGroup}
+                    onClick={() => void toggleCrossfade()}
+                  >
+                    <Blend size={16} />
+                  </button>
+                </>
+              )}
+              <SleepTimer
+                remainingSeconds={nowPlaying?.sleepTimerSeconds}
+                disabled={!selectedGroup}
+                onSet={(seconds) => void setSleep(seconds)}
+              />
+            </div>
+            ) : null}
           </div>
-          {!localMode ? (
-          <div className="transport-modes">
-            {isLiveStream ? (
-              <>
-                <button
-                  className={`icon-button mode${activeItemFavorited ? " active" : ""}`}
-                  type="button"
-                  title={activeItemFavorited ? "Remove favorite (F)" : "Add favorite (F)"}
-                  aria-label="Toggle favorite"
-                  aria-keyshortcuts="F"
-                  disabled={!activeItemPinnable}
-                  onClick={() => activeQueueItem && void toggleQueueFavorite(activeQueueItem, true)}
-                >
-                  <Heart size={16} fill={activeItemFavorited ? "currentColor" : "none"} />
-                </button>
-                <button
-                  className={`icon-button mode${activeItemPreset ? " active" : ""}`}
-                  type="button"
-                  title={activeItemPreset ? "Remove preset (Shift+F)" : "Save as preset (Shift+F)"}
-                  aria-label="Toggle preset"
-                  aria-keyshortcuts="Shift+F"
-                  disabled={!activeItemPinnable}
-                  onClick={() => activeQueueItem && void toggleQueuePreset(activeQueueItem)}
-                >
-                  <Star size={16} fill={activeItemPreset ? "currentColor" : "none"} />
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className={`icon-button mode${nowPlaying?.repeat && nowPlaying.repeat !== "none" ? " active" : ""}`}
-                  type="button"
-                  title={`${nowPlaying?.repeat === "one" ? "Repeat one" : nowPlaying?.repeat === "all" ? "Repeat all" : "Repeat off"} (R)`}
-                  aria-label="Cycle repeat mode"
-                  aria-keyshortcuts="R"
-                  disabled={!selectedGroup}
-                  onClick={() => void cycleRepeat()}
-                >
-                  {nowPlaying?.repeat === "one" ? <Repeat1 size={16} /> : <Repeat size={16} />}
-                </button>
-                <button
-                  className={`icon-button mode${nowPlaying?.shuffle ? " active" : ""}`}
-                  type="button"
-                  title={nowPlaying?.shuffle ? "Shuffle on (S)" : "Shuffle off (S)"}
-                  aria-label="Toggle shuffle"
-                  aria-keyshortcuts="S"
-                  disabled={!selectedGroup}
-                  onClick={() => void toggleShuffle()}
-                >
-                  <Shuffle size={16} />
-                </button>
-                <button
-                  className={`icon-button mode${nowPlaying?.crossfade ? " active" : ""}`}
-                  type="button"
-                  title={nowPlaying?.crossfade ? "Crossfade on (C)" : "Crossfade off (C)"}
-                  aria-label="Toggle crossfade"
-                  aria-keyshortcuts="C"
-                  disabled={!selectedGroup}
-                  onClick={() => void toggleCrossfade()}
-                >
-                  <Blend size={16} />
-                </button>
-              </>
-            )}
-            <SleepTimer
-              remainingSeconds={nowPlaying?.sleepTimerSeconds}
-              disabled={!selectedGroup}
-              onSet={(seconds) => void setSleep(seconds)}
-            />
-          </div>
-          ) : null}
           <div className="playback-volume">
             <VolumeControl
               label={localMode ? "This device" : primaryVolumeLabel}
@@ -1415,7 +1419,8 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
     }
   }, [sourceId, pinnedIds]);
 
-  const browseGroupOptions = useMemo(() => [...buildGroupOptions(groups), DEVICE_OPTION], [groups]);
+  const groupColors = useGroupColors();
+  const browseGroupOptions = useMemo(() => [...buildGroupOptions(groups, groupColors), DEVICE_OPTION], [groups, groupColors]);
 
   const runSearch = useCallback(async (overrideType?: "song" | "artist" | "album") => {
     if (!sourceId || !searchQuery.trim()) return;

@@ -18,7 +18,8 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import type { EqPayload, EqPresetValues, SonosGroup } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
 import { bridgeApi } from "./api.js";
-import { assignGroupPalettes, paletteForGroup } from "./groupPalette.js";
+import { assignGroupPalettes, groupPalette, paletteForGroup, type PaletteEntry } from "./groupPalette.js";
+import { setGroupColor, useGroupColors } from "./groupColors.js";
 
 interface GroupEditorProps {
   groups: SonosGroup[];
@@ -206,8 +207,8 @@ function GroupContainerNode({ data }: NodeProps<EditorNode>) {
         <button
           type="button"
           className="group-eq-button"
-          title="Equalizer for this group"
-          aria-label={`Equalizer for ${data.label}`}
+          title="Color and EQ for this group"
+          aria-label={`Settings for the ${data.label} group`}
           style={{ borderColor: data.color, color: data.color }}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => { event.stopPropagation(); ctx.openEq(data.groupId); }}
@@ -302,6 +303,7 @@ interface ZoneActionMenuProps {
 }
 
 function ZoneActionMenu({ state, groups, onClose, onPromote, onMove, onSplit }: ZoneActionMenuProps) {
+  const groupColors = useGroupColors();
   let sourceGroup: SonosGroup | undefined;
   let zoneName = "";
   let isCoordinator = false;
@@ -319,7 +321,7 @@ function ZoneActionMenu({ state, groups, onClose, onPromote, onMove, onSplit }: 
   const otherGroups = groups.filter((group) => group.id !== sourceGroup!.id && !isOptimisticGroupId(group.id));
   const canPromote = !isCoordinator && visibleSource.length > 1;
   const canSplit = visibleSource.length > 1;
-  const palettes = assignGroupPalettes(groups);
+  const palettes = assignGroupPalettes(groups, groupColors);
 
   return (
     <>
@@ -378,6 +380,7 @@ function GroupFlow({ groups, selectedGroupId, onSelectGroup, onJoinZoneGroup, on
   const [pickedZone, setPickedZone] = useState<{ zoneId: string; groupId: string; label: string } | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [eqGroupId, setEqGroupId] = useState<string | null>(null);
+  const groupColors = useGroupColors();
   const suppressClickRef = useRef(false);
   const openMenu = useCallback((state: MenuState) => setMenu(state), []);
   const openEq = useCallback((groupId: string) => setEqGroupId(groupId), []);
@@ -386,7 +389,8 @@ function GroupFlow({ groups, selectedGroupId, onSelectGroup, onJoinZoneGroup, on
     [pickedZone, openMenu, openEq]
   );
   const eqGroup = eqGroupId ? groups.find((group) => group.id === eqGroupId) ?? null : null;
-  const eqPalette = eqGroup ? (assignGroupPalettes(groups).get(eqGroup.coordinatorId) ?? paletteForGroup(eqGroup.coordinatorId)) : null;
+  const palettes = useMemo(() => assignGroupPalettes(groups, groupColors), [groups, groupColors]);
+  const eqPalette = eqGroup ? (palettes.get(eqGroup.coordinatorId) ?? paletteForGroup(eqGroup.coordinatorId)) : null;
 
   const [canvasSize, setCanvasSize] = useState<{ w: number; h: number }>({ w: FALLBACK_CANVAS_WIDTH, h: FALLBACK_CANVAS_HEIGHT });
 
@@ -430,8 +434,8 @@ function GroupFlow({ groups, selectedGroupId, onSelectGroup, onJoinZoneGroup, on
   }, [canvasSize, reactFlow]);
   const slotsRef = useRef<Map<string, number>>(new Map());
   const layout = useMemo(
-    () => buildLayout(groups, selectedGroupId, slotsRef.current, canvasSize),
-    [groups, selectedGroupId, canvasSize]
+    () => buildLayout(groups, selectedGroupId, slotsRef.current, canvasSize, palettes),
+    [groups, selectedGroupId, canvasSize, palettes]
   );
   const layoutKey = useMemo(() => JSON.stringify(layout), [layout]);
   const lastKeyRef = useRef("");
@@ -569,10 +573,12 @@ function GroupFlow({ groups, selectedGroupId, onSelectGroup, onJoinZoneGroup, on
       />
     ) : null}
     {eqGroup && eqPalette ? (
-      <GroupEqModal
+      <GroupSettingsModal
         group={eqGroup}
-        color={eqPalette.color}
-        colorName={eqPalette.name}
+        groups={groups}
+        palette={eqPalette}
+        palettes={palettes}
+        picked={groupColors[eqGroup.coordinatorId]}
         onClose={() => setEqGroupId(null)}
       />
     ) : null}
@@ -580,7 +586,30 @@ function GroupFlow({ groups, selectedGroupId, onSelectGroup, onJoinZoneGroup, on
   );
 }
 
-function GroupEqModal({ group, color, colorName, onClose }: { group: SonosGroup; color: string; colorName: string; onClose: () => void }) {
+interface GroupSettingsModalProps {
+  group: SonosGroup;
+  groups: SonosGroup[];
+  /** The group's color now, picked or automatic. */
+  palette: PaletteEntry;
+  palettes: Map<string, PaletteEntry>;
+  /** The picked color's name; unset while the color is automatic. */
+  picked?: string;
+  onClose: () => void;
+}
+
+// A group's settings: its color (which also names it) and its EQ.
+function GroupSettingsModal({ group, groups, palette, palettes, picked, onClose }: GroupSettingsModalProps) {
+  const { color, name: colorName } = palette;
+  // Which other group wears each color, for the swatch tooltips.
+  const wornBy = useMemo(() => {
+    const result = new Map<string, string>();
+    for (const other of groups) {
+      if (other.id === group.id) continue;
+      const entry = palettes.get(other.coordinatorId);
+      if (entry) result.set(entry.name, other.zones.filter((zone) => zone.visible).map((zone) => zone.name).join(" + "));
+    }
+    return result;
+  }, [group.id, groups, palettes]);
   const rooms = useMemo(() => group.zones.filter((zone) => zone.visible), [group]);
   const coordinator = useMemo(() => rooms.find((zone) => zone.uuid === group.coordinatorId) ?? rooms[0], [rooms, group.coordinatorId]);
   const [bass, setBass] = useState(0);
@@ -634,15 +663,53 @@ function GroupEqModal({ group, color, colorName, onClose }: { group: SonosGroup;
 
   return (
     <div className="eq-modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="eq-modal" role="dialog" aria-modal="true" aria-label={`Equalizer for ${colorName} group`} onClick={(event) => event.stopPropagation()}>
+      <div
+        className="eq-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Settings for the ${colorName} group`}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } }}
+      >
         <div className="section-heading">
           <h2 className="eq-modal-title">
             <span className="group-color-chip" style={{ background: color }} aria-hidden="true" />
-            {colorName} EQ
+            {colorName} group
           </h2>
           <button type="button" className="icon-button compact" aria-label="Close" onClick={onClose}><X size={16} /></button>
         </div>
         <p className="eq-modal-sub">Applies to {roomLabel}{rooms.length > 1 ? `: ${rooms.map((room) => room.name).join(", ")}` : ""}</p>
+        <div className="group-color-picker">
+          <span className="eq-presets-label">Color</span>
+          <div className="group-color-swatches" role="radiogroup" aria-label="Group color">
+            {groupPalette.map((entry) => {
+              const worn = wornBy.get(entry.name);
+              return (
+                <button
+                  key={entry.name}
+                  type="button"
+                  role="radio"
+                  aria-checked={entry.name === colorName}
+                  aria-label={entry.name}
+                  title={worn ? `${entry.name} (now ${worn}, which then gets another color)` : entry.name}
+                  className="group-color-swatch"
+                  style={{ background: entry.color }}
+                  onClick={() => setGroupColor(group.coordinatorId, entry.name)}
+                />
+              );
+            })}
+            <button
+              type="button"
+              className={picked ? "eq-chip" : "eq-chip selected-chip"}
+              aria-pressed={!picked}
+              title="Let MiSonos pick a color no other group has"
+              onClick={() => setGroupColor(group.coordinatorId, null)}
+            >
+              Automatic
+            </button>
+          </div>
+        </div>
+        <span className="eq-presets-label">Equalizer</span>
         {state === "error" ? (
           <div className="empty-panel error-panel"><span>{error}</span></div>
         ) : state === "loading" ? (
@@ -701,13 +768,13 @@ function buildLayout(
   groups: SonosGroup[],
   selectedGroupId: string | undefined,
   slots: Map<string, number>,
-  canvas: { w: number; h: number }
+  canvas: { w: number; h: number },
+  palettes: Map<string, PaletteEntry>
 ): EditorNode[] {
   const visibleZonesByGroup = groups.map((group) =>
     group.zones.filter((zone) => zone.visible).slice().sort((a, b) => a.uuid.localeCompare(b.uuid))
   );
   const memberKeys = visibleZonesByGroup.map(membershipKey);
-  const palettes = assignGroupPalettes(groups);
 
   const liveKeys = new Set(memberKeys);
   for (const key of Array.from(slots.keys())) {

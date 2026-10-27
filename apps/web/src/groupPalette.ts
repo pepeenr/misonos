@@ -16,21 +16,33 @@ export interface GroupOption {
   device?: boolean;
 }
 
+/** Colors picked by the user: coordinator id → palette entry name (see groupColors.ts). */
+export type GroupColorChoices = Readonly<Record<string, string>>;
+
 /**
  * Assign a distinct palette entry to each group, keyed by coordinator id.
  *
- * Each group prefers the slot its coordinator hashes to (so colors stay stable across
- * membership changes), but when two groups would collide we linear-probe to the next
- * free slot — so distinct groups get distinct colors while the palette has room
- * (only > groupPalette.length groups can share). Priority order is sorted by coordinator
+ * A group whose color was picked gets it. Every other group prefers the slot its
+ * coordinator hashes to (so colors stay stable across membership changes), but when
+ * that slot is taken we linear-probe to the next free one — so distinct groups get
+ * distinct colors while the palette has room (only > groupPalette.length groups, or
+ * two groups picked the same color, can share). Priority order is sorted by coordinator
  * id, so the assignment is deterministic and independent of array order.
  */
-export function assignGroupPalettes(groups: SonosGroup[]): Map<string, PaletteEntry> {
+export function assignGroupPalettes(groups: SonosGroup[], choices: GroupColorChoices = {}): Map<string, PaletteEntry> {
   const size = groupPalette.length;
   const used = new Set<number>();
   const result = new Map<string, PaletteEntry>();
   const ordered = [...groups].sort((a, b) => a.coordinatorId.localeCompare(b.coordinatorId));
+  // Picked colors first, so the automatic ones steer around them.
   for (const group of ordered) {
+    const slot = groupPalette.findIndex((entry) => entry.name === choices[group.coordinatorId]);
+    if (slot === -1) continue;
+    used.add(slot);
+    result.set(group.coordinatorId, groupPalette[slot]);
+  }
+  for (const group of ordered) {
+    if (result.has(group.coordinatorId)) continue;
     let slot = hashStrings([group.coordinatorId]) % size;
     if (used.size < size) {
       let steps = 0;
@@ -46,8 +58,8 @@ export function assignGroupPalettes(groups: SonosGroup[]): Map<string, PaletteEn
 }
 
 /** Build the color-named group options shared by the topbar, Browse, and Library pickers. */
-export function buildGroupOptions(groups: SonosGroup[]): GroupOption[] {
-  const palettes = assignGroupPalettes(groups);
+export function buildGroupOptions(groups: SonosGroup[], choices: GroupColorChoices = {}): GroupOption[] {
+  const palettes = assignGroupPalettes(groups, choices);
   return groups.map((group) => {
     const visible = group.zones.filter((zone) => zone.visible);
     const palette = palettes.get(group.coordinatorId) ?? paletteForGroup(group.coordinatorId);
