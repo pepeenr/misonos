@@ -1,4 +1,5 @@
 import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus, TransportAction, VolumePayload, VolumeState } from "@misonos/sonos-protocol";
+import { noteBridgeFailure } from "./accessSession.js";
 import { apiUrl } from "./servers.js";
 
 export interface AddPlaylistItemInput {
@@ -34,6 +35,8 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs?: number):
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new Error("Bridge did not respond — it may be offline or unreachable.");
     }
+    // A redirect to the Cloudflare Access login also lands here, as a TypeError.
+    if (error instanceof TypeError) noteBridgeFailure();
     throw error;
   }
   if (!response.ok) {
@@ -269,10 +272,17 @@ export interface SourceIconMeta {
 
 export function subscribeBridgeEvents(onEvent: (event: BridgeEvent) => void, onError: () => void): () => void {
   const source = new EventSource(apiUrl("/api/events"));
-  const handler = (message: MessageEvent<string>) => onEvent(JSON.parse(message.data) as BridgeEvent);
+  // The bridge's own "error" messages share the name of the stream's connection-error
+  // event, which carries no data, so only parse events that have some.
+  const handler = (message: MessageEvent<string>) => {
+    if (typeof message.data === "string") onEvent(JSON.parse(message.data) as BridgeEvent);
+  };
   source.addEventListener("snapshot", handler as EventListener);
   source.addEventListener("now-playing", handler as EventListener);
   source.addEventListener("error", handler as EventListener);
-  source.onerror = onError;
+  source.onerror = () => {
+    noteBridgeFailure();
+    onError();
+  };
   return () => source.close();
 }
