@@ -1,8 +1,9 @@
-import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { IconMusic } from "@tabler/icons-react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
+import { startAccessSignIn, useAccessSignedOut } from "./accessSession.js";
 import { artSrc, bridgeApi, subscribeBridgeEvents } from "./api.js";
 import { apiUrl } from "./servers.js";
 import { AddToPlaylistModal } from "./AddToPlaylistModal.js";
@@ -68,6 +69,7 @@ export function App() {
   const [queueDragReorder, setQueueDragReorder] = useState<boolean>(() => readLocalPref(QUEUE_DRAG_REORDER_PREF) ?? false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [message, setMessage] = useState("Ready");
+  const accessSignedOut = useAccessSignedOut();
   const [recentNudge, setRecentNudge] = useState<{ id: number; title: string; itemCount: number } | null>(null);
   const processedNudgeTokenRef = useRef<string | null>(null);
   const lastPlayingUriRef = useRef<string | null>(null);
@@ -797,6 +799,17 @@ export function App() {
           </>
         )}
       </header>
+
+      {accessSignedOut ? (
+        <div className="restore-nudge" role="alert">
+          <span className="restore-nudge-text">Your sign-in has expired, so MiSonos can't reach the speakers.</span>
+          <div className="restore-nudge-actions">
+            <button type="button" className="restore-nudge-restore" onClick={startAccessSignIn}>
+              <LogIn size={14} /> Sign in
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {recentNudge ? (
         <div className="restore-nudge" role="status">

@@ -27,8 +27,10 @@ export default defineConfig({
       },
       workbox: {
         // Never let the SW intercept bridge calls — SSE (/api/events) and dynamic
-        // endpoints must always hit the network.
-        navigateFallbackDenylist: [/^\/api\//],
+        // endpoints must always hit the network. The Cloudflare Access login has to
+        // reach the network too: `/?signin` is where the app sends an expired session
+        // (accessSession.ts) and `/cdn-cgi/` is Access's callback that sets the cookie.
+        navigateFallbackDenylist: [/^\/api\//, /^\/cdn-cgi\//, /^\/\?signin(?:[=&]|$)/],
         // Quiet the verbose dev-mode console logging ("No route found" / "Precaching
         // did not find a match") that fired for every uncached bridge call.
         disableDevLogs: true,
