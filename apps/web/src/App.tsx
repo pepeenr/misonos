@@ -526,6 +526,27 @@ export function App() {
     }
   }, [zoneVolumes, selectedGroup, groupVolume, loadVolumes]);
 
+  // The group volume is the rooms' average, and moving it scales each room, so rooms
+  // set to different levels stay apart. This sets every room to the group volume.
+  const evenOutRoomVolumes = async () => {
+    if (!selectedGroup || !groupVolume) return;
+    const level = Math.min(groupVolume.volume, maxVolume);
+    const furthest = selectedVisibleZones
+      .map((zone) => zoneVolumes[zone.id]?.volume)
+      .reduce<number | undefined>((far, volume) => volume !== undefined && (far === undefined || Math.abs(volume - level) > Math.abs(far - level)) ? volume : far, undefined);
+    if (!(await confirmVolumeJump(furthest, level))) return;
+    const results = await Promise.all(selectedVisibleZones.map((zone) => bridgeApi.volume(zone.id, { volume: level }).catch(() => null)));
+    setZoneVolumes((current) => {
+      const next = { ...current };
+      for (const volume of results) {
+        if (volume) next[volume.id] = volume;
+      }
+      return next;
+    });
+    void loadVolumes(selectedGroup);
+  };
+  const roomVolumesEven = !!groupVolume && selectedVisibleZones.every((zone) => zoneVolumes[zone.id]?.volume === groupVolume.volume);
+
   const toggleGroupMute = async () => {
     if (!selectedGroup || !groupVolume) return;
     setGroupVolume(await bridgeApi.setGroupVolume(selectedGroup.id, { muted: !groupVolume.muted }));
@@ -1081,7 +1102,17 @@ export function App() {
               <div className="volume-popover" role="dialog" aria-label="Room volumes">
                 <div className="volume-popover-heading">
                   <strong>Room Volume</strong>
-                  <button type="button" aria-label="Close room volumes" onClick={() => setVolumePopoverOpen(false)}>Close</button>
+                  <div className="volume-popover-actions">
+                    <button
+                      type="button"
+                      title="Set every room to the group volume"
+                      disabled={!groupVolume || roomVolumesEven}
+                      onClick={() => void evenOutRoomVolumes()}
+                    >
+                      Even out
+                    </button>
+                    <button type="button" aria-label="Close room volumes" onClick={() => setVolumePopoverOpen(false)}>Close</button>
+                  </div>
                 </div>
                 {selectedVisibleZones.map((zone) => (
                   <div className="volume-popover-row" key={zone.id}>

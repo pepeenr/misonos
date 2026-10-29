@@ -85,6 +85,45 @@ describe("App", () => {
     fireEvent.keyDown(document.body, { key: "1", code: "Digit1" });
     await waitFor(() => expect(plays).toHaveLength(2));
   });
+
+  it("evens out the rooms of a group to the group volume", async () => {
+    const zones = [
+      { id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true },
+      { id: "z2", uuid: "z2", name: "Office", ipAddress: "10.0.0.3", location: "", visible: true }
+    ];
+    const group = { id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones };
+    const roomVolumes: Record<string, number> = { z1: 7, z2: 11 };
+    const sets: Array<{ zone: string; volume: number }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/groups")) return json([group]);
+      if (url.endsWith("/api/zones")) return json(zones);
+      if (url.endsWith("/api/sources")) return json([]);
+      if (url.endsWith("/api/groups/g1/volume")) return json({ id: "g1", volume: 9, muted: false });
+      const zoneVolume = url.match(/\/api\/zones\/(z\d)\/volume$/);
+      if (zoneVolume) {
+        const zone = zoneVolume[1];
+        if (init?.method === "POST") {
+          const { volume } = JSON.parse(String(init.body)) as { volume: number };
+          sets.push({ zone, volume });
+          roomVolumes[zone] = volume;
+        }
+        return json({ id: zone, volume: roomVolumes[zone], muted: false });
+      }
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      return json({ groups: [group], zones });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    const groupSlider = await screen.findByRole("slider", { name: /group volume$/ });
+    await waitFor(() => expect(groupSlider).toHaveValue("9"));
+    fireEvent.pointerDown(groupSlider);
+    const evenOut = await screen.findByRole("button", { name: "Even out" });
+    await waitFor(() => expect(evenOut).not.toBeDisabled());
+    fireEvent.click(evenOut);
+    await waitFor(() => expect(sets).toEqual(expect.arrayContaining([{ zone: "z1", volume: 9 }, { zone: "z2", volume: 9 }])));
+    await waitFor(() => expect(evenOut).toBeDisabled());
+  });
 });
 
 function json(value: unknown): Response {
