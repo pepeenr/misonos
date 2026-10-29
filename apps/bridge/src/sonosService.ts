@@ -124,6 +124,14 @@ export class SonosService {
     items: { sourceId: string; trackId: string; title: string; artist: string | null; album: string | null }[];
     startTrack: number | null;
   }) => void | Promise<void>;
+  // Fired after every enqueue. For a replace that left a single track, `singleTrack` is
+  // that track and `replaced` the multi-track queue it wiped (when there was one).
+  onEnqueue?: (event: {
+    groupId: string;
+    mode: PlaybackMode;
+    singleTrack?: { sourceId: string; trackId: string };
+    replaced?: { items: { sourceId: string; trackId: string }[]; startTrack: number };
+  }) => void;
   // The Sonos Spotify account picked in Settings ({ sid, sn, token }), if any.
   readSpotifyAccountChoice?: () => Promise<unknown>;
   private spotifyAccountCache: { accounts: SonosSpotifyAccount[]; expires: number } | undefined;
@@ -933,18 +941,22 @@ export class SonosService {
       return { uri: proxyUrl, metadata: buildDidl(proxiedTrack) };
     });
 
+    let replaced: { items: { sourceId: string; trackId: string }[]; startTrack: number } | undefined;
+    let tracksAdded = 0;
     if (mode === "replace") {
       // About to wipe the queue — give a listener the chance to archive it first.
-      await this.archiveQueueBeforeReplace(groupId, coordinator.uuid, coordinator.ipAddress);
+      replaced = await this.archiveQueueBeforeReplace(groupId, coordinator.uuid, coordinator.ipAddress);
       await callSoap(coordinator.ipAddress, "AVTransport", "RemoveAllTracksFromQueue", { InstanceID: 0 });
       for (const item of queueItems) {
-        await callSoap(coordinator.ipAddress, "AVTransport", "AddURIToQueue", {
+        const added = await callSoap(coordinator.ipAddress, "AVTransport", "AddURIToQueue", {
           InstanceID: 0,
           EnqueuedURI: item.uri,
           EnqueuedURIMetaData: item.metadata,
           DesiredFirstTrackNumberEnqueued: 0,
           EnqueueAsNext: 0
         }, ENQUEUE_TIMEOUT_MS);
+        // A container (a whole Spotify album or playlist) adds all its tracks at once.
+        tracksAdded += Math.max(1, Number.parseInt(added.NumTracksAdded ?? "1", 10) || 1);
       }
       await callSoap(coordinator.ipAddress, "AVTransport", "SetAVTransportURI", {
         InstanceID: 0,
@@ -988,6 +1000,7 @@ export class SonosService {
       }
     }
 
+    this.onEnqueue?.({ groupId, mode, singleTrack: mode === "replace" && tracksAdded === 1 ? refs[0] : undefined, replaced });
     return this.nowPlaying(groupId);
   }
 
@@ -1022,18 +1035,21 @@ export class SonosService {
    * Snapshot the current queue and hand it to `onQueueArchive` before a replace wipes
    * it. Only multi-track queues are archived (a lone live radio stream isn't worth
    * keeping, and naturally excludes empty/line-in/TV sources, which aren't queue-based).
-   * Best-effort: never throws — archiving must not block or fail playback.
+   * Returns the archived queue. Best-effort: never throws — archiving must not block or
+   * fail playback.
    */
-  private async archiveQueueBeforeReplace(groupId: string, coordinatorUuid: string, coordinatorIp: string): Promise<void> {
-    if (!this.onQueueArchive) return;
+  private async archiveQueueBeforeReplace(groupId: string, coordinatorUuid: string, coordinatorIp: string): Promise<{ items: { sourceId: string; trackId: string }[]; startTrack: number } | undefined> {
+    if (!this.onQueueArchive && !this.onEnqueue) return undefined;
     try {
       const snapshot = await this.queueTrackRefs(groupId);
-      if (snapshot.items.length < 2) return;
+      if (snapshot.items.length < 2) return undefined;
       const position = await callSoap(coordinatorIp, "AVTransport", "GetPositionInfo", { InstanceID: 0 });
       const startTrack = numericPosition(position.Track) ?? 1;
-      await this.onQueueArchive({ coordinatorUuid, items: snapshot.items, startTrack });
+      await this.onQueueArchive?.({ coordinatorUuid, items: snapshot.items, startTrack });
+      return { items: snapshot.items, startTrack };
     } catch (error) {
       console.warn(`[bridge] queue archive skipped: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
     }
   }
 

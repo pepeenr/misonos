@@ -34,6 +34,9 @@ type PendingGroupEdit =
   | { id: string; type: "standalone"; zoneId: string };
 
 const LOCAL_DEVICE_ID = "local-device";
+// How long after a single song ends the restore offer waits for the bridge to bring
+// the previous queue back by itself (3 s, plus the time to queue it again).
+const QUEUE_RETURN_GRACE_MS = 12_000;
 const DEVICE_OPTION: GroupOption = { id: LOCAL_DEVICE_ID, key: LOCAL_DEVICE_ID, name: "This device", color: "", zoneList: "Plays in this browser", device: true };
 
 // Progress shape (matching playbackProgressFromNowPlaying) for the local player.
@@ -72,6 +75,7 @@ export function App() {
   const accessSignedOut = useAccessSignedOut();
   const [recentNudge, setRecentNudge] = useState<{ id: number; title: string; itemCount: number } | null>(null);
   const processedNudgeTokenRef = useRef<string | null>(null);
+  const pendingNudgeRef = useRef<{ token: string; timer: number } | null>(null);
   const lastPlayingUriRef = useRef<string | null>(null);
   const [groupPlayback, setGroupPlayback] = useState<Record<string, PlaybackState>>({});
   const [showDevPanels, setShowDevPanels] = useState<boolean>(() => readLocalPref(SHOW_DEV_PANELS_PREF) ?? false);
@@ -351,15 +355,24 @@ export function App() {
   // It only fires for a stream we've actually heard PLAYING, so a fresh station's brief
   // startup STOPPED doesn't flash — only a stop AFTER it played does. Re-arms once
   // playback resumes; processed once per stopped URI so it neither re-polls nor reappears.
+  //
+  // A single song that played to its end is different: the bridge puts the queue it
+  // replaced back by itself a few seconds later (queueReturn.ts). So that case waits
+  // before offering, and only offers if the music didn't come back.
   useEffect(() => {
-    if (localMode) { setRecentNudge(null); return; }
+    const cancelPendingNudge = () => {
+      if (pendingNudgeRef.current) window.clearTimeout(pendingNudgeRef.current.timer);
+      pendingNudgeRef.current = null;
+    };
+    if (localMode) { cancelPendingNudge(); setRecentNudge(null); return; }
     const coordinatorUuid = selectedGroup?.coordinatorId;
-    if (!nowPlaying || !coordinatorUuid) { setRecentNudge(null); return; }
+    if (!nowPlaying || !coordinatorUuid) { cancelPendingNudge(); setRecentNudge(null); return; }
     const uri = nowPlaying.uri ?? null;
     if (nowPlaying.state === "PLAYING") lastPlayingUriRef.current = uri;
     // A live stream has no real "stop" — its pause IS the stop — so treat both as idle.
     const idle = nowPlaying.state === "STOPPED" || nowPlaying.state === "PAUSED_PLAYBACK";
     if (!idle) {
+      cancelPendingNudge();
       setRecentNudge(null);
       processedNudgeTokenRef.current = null; // re-arm for the next stop
       return;
@@ -367,14 +380,22 @@ export function App() {
     const isDetour = !!nowPlaying.isLive || (!!uri && queue.length <= 1);
     // Require having heard THIS stream play, so switching stations (startup STOPPED on
     // the new URI) doesn't flash the nudge before it has begun.
-    if (!isDetour || lastPlayingUriRef.current !== uri) { setRecentNudge(null); return; }
+    if (!isDetour || lastPlayingUriRef.current !== uri) { cancelPendingNudge(); setRecentNudge(null); return; }
     const token = `${coordinatorUuid}:${uri ?? "idle"}`;
-    if (processedNudgeTokenRef.current === token) return;
-    processedNudgeTokenRef.current = token;
-    void bridgeApi.recentQueues(coordinatorUuid)
-      .then((list) => setRecentNudge(list.length ? { id: list[0].id, title: list[0].title, itemCount: list[0].itemCount } : null))
-      .catch(() => { /* non-fatal */ });
+    if (processedNudgeTokenRef.current === token || pendingNudgeRef.current?.token === token) return;
+    cancelPendingNudge();
+    const offer = () => {
+      pendingNudgeRef.current = null;
+      processedNudgeTokenRef.current = token;
+      void bridgeApi.recentQueues(coordinatorUuid)
+        .then((list) => setRecentNudge(list.length ? { id: list[0].id, title: list[0].title, itemCount: list[0].itemCount } : null))
+        .catch(() => { /* non-fatal */ });
+    };
+    const songEnded = !nowPlaying.isLive && nowPlaying.state === "STOPPED";
+    if (!songEnded) { offer(); return; }
+    pendingNudgeRef.current = { token, timer: window.setTimeout(offer, QUEUE_RETURN_GRACE_MS) };
   }, [nowPlaying, selectedGroup?.coordinatorId, queue.length, localMode]);
+  useEffect(() => () => { if (pendingNudgeRef.current) window.clearTimeout(pendingNudgeRef.current.timer); }, []);
 
   useEffect(() => { if (vuOpen && !vuSupported) setVuOpen(false); }, [vuOpen, vuSupported]);
 
