@@ -2611,6 +2611,16 @@ small {
   cursor: pointer;
 }
 
+.volume-popover-heading button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.volume-popover-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .queue-list {
   max-height: 44vh;
   padding-left: 0;

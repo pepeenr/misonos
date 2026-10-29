@@ -2,6 +2,7 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { AlarmInput, BridgeEvent, EqPayload, EqPreset, Favorite, NowPlaying, PlaybackMode, RecentlyViewedItem, RepeatMode, SourceItemKind, TransportAction, VolumePayload } from "@misonos/sonos-protocol";
 import type { BridgeConfig } from "./config.js";
+import { QueueReturn } from "./queueReturn.js";
 import { SonosEventManager } from "./sonosEvents.js";
 import { SonosService } from "./sonosService.js";
 import type { Store } from "./store/index.js";
@@ -92,6 +93,18 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       .catch((error) => console.warn(`[bridge] saveRecentQueue failed: ${errorMessage(error)}`));
   };
 
+  // After a single song played over a queue ends, put that queue back and play it.
+  const queueReturn = new QueueReturn({
+    refOf: (uri) => service.refFromQueueUri(uri),
+    resume: async (groupId, queue, startTrack) => {
+      // Someone pressed play or picked something else in the meantime.
+      if ((await service.nowPlaying(groupId)).state !== "STOPPED") return;
+      const nowPlaying = await service.playTrackRefs(queue, groupId, "replace", startTrack);
+      sendEvent({ type: "now-playing", payload: nowPlaying, at: new Date().toISOString() });
+    }
+  });
+  service.onEnqueue = (event) => queueReturn.onEnqueue(event.groupId, event);
+
   setInterval(async () => {
     if (clients.size === 0) return;
     try {
@@ -150,7 +163,11 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
 
     const nowPlayingMatch = url.pathname.match(/^\/api\/groups\/([^/]+)\/now-playing$/);
     if (request.method === "GET" && nowPlayingMatch) {
-      return json(response, await service.nowPlaying(decodeURIComponent(nowPlayingMatch[1])));
+      const groupId = decodeURIComponent(nowPlayingMatch[1]);
+      const nowPlaying = await service.nowPlaying(groupId);
+      // Open apps poll this, which covers a Sonos event that never arrived.
+      queueReturn.onNowPlaying(groupId, nowPlaying);
+      return json(response, nowPlaying);
     }
 
     const queueMatch = url.pathname.match(/^\/api\/groups\/([^/]+)\/queue$/);
@@ -799,6 +816,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       }
       if (groupId) {
         const nowPlaying = await service.nowPlayingSettled(groupId);
+        queueReturn.onNowPlaying(groupId, nowPlaying);
         await captureResume(groupId, nowPlaying);
         void recordPlayed(groupId, nowPlaying);
         sendEvent({ type: "now-playing", payload: nowPlaying, at: new Date().toISOString() });
