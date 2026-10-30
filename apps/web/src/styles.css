@@ -309,13 +309,14 @@ button {
 
 .controller-grid.main-view {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "search" "now" "presets" "queue" "playlists";
+  grid-template-areas: "now" "search" "presets" "queue" "playlists";
 }
 
-/* Music's search box, on the main screen (rendered by SourceBrowser). */
+/* Music's search box, as a card on the main screen (rendered by SourceBrowser). */
 .main-search {
   grid-area: search;
   min-width: 0;
+  padding: 14px;
 }
 
 .main-search:empty {
@@ -324,38 +325,56 @@ button {
 
 .main-search-form {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: stretch;
+  gap: 10px;
   min-width: 0;
 }
 
 .main-search-form .source-picker {
-  flex: 0 1 190px;
+  flex: 0 1 220px;
+}
+
+.main-search-form .source-picker-trigger {
+  height: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+}
+
+.main-search-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.main-search-field svg {
+  position: absolute;
+  top: 50%;
+  left: 15px;
+  transform: translateY(-50%);
+  color: #aeb4ad;
+  pointer-events: none;
 }
 
 .main-search-form input[type="search"] {
   flex: 1;
   min-width: 0;
-  padding: 8px 10px;
+  min-height: 48px;
+  padding: 0 14px 0 44px;
   border: 1px solid rgba(242, 240, 232, 0.18);
-  border-radius: 6px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
   color: #f2f0e8;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 1.05rem;
 }
 
 .main-search-form input[type="search"]:disabled {
   opacity: 0.6;
 }
 
-.browse-search-results {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  color: #f2f0e8;
-  font-size: 0.88rem;
+.main-search-form .browse-search-clear {
+  padding: 0 14px;
 }
 
 /* Phones: the source's icon alone (the box names the source); its menu keeps a usable width. */
@@ -1562,6 +1581,7 @@ h2 {
 .sidebar,
 .group-editor-panel,
 .now-playing,
+.main-search,
 .presets-panel,
 .queue-panel {
   border: 1px solid rgba(242, 240, 232, 0.12);

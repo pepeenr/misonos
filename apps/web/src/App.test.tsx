@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { BridgeEvent } from "@misonos/sonos-protocol";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
 import { DialogProvider } from "./dialogs.js";
@@ -6,16 +7,29 @@ import { FavoritesProvider } from "./favorites.js";
 import { LocalPlayerProvider } from "./localPlayer.js";
 
 class FakeEventSource {
+  static instances: FakeEventSource[] = [];
   onerror: (() => void) | null = null;
   private listeners = new Map<string, EventListener>();
+  closed = false;
 
-  constructor(readonly url: string) {}
+  constructor(readonly url: string) {
+    FakeEventSource.instances.push(this);
+  }
 
   addEventListener(type: string, listener: EventListener) {
     this.listeners.set(type, listener);
   }
 
-  close() {}
+  /** Delivers a bridge event to every open stream, as the bridge would. */
+  static emit(event: BridgeEvent) {
+    for (const source of FakeEventSource.instances) {
+      if (!source.closed) source.listeners.get(event.type)?.(new MessageEvent(event.type, { data: JSON.stringify(event) }));
+    }
+  }
+
+  close() {
+    this.closed = true;
+  }
 }
 
 describe("App", () => {
@@ -106,14 +120,43 @@ describe("App", () => {
 
     const box = await screen.findByRole("searchbox", { name: "Search Navidrome" });
     await waitFor(() => expect(box).not.toBeDisabled());
+    // The search card sits right under Now Playing.
+    expect(box.closest(".main-search")?.previousElementSibling).toHaveAttribute("aria-label", "Now playing");
     fireEvent.change(box, { target: { value: "ripple" } });
     fireEvent.submit(box.closest("form")!);
     await waitFor(() => expect(searches).toHaveLength(1));
     expect(searches[0]).toContain("q=ripple");
-    // The results open in Music, which has no search box of its own.
-    expect(await screen.findByText("“ripple”")).toBeInTheDocument();
+    // The results open in Music, whose own box holds the same query and searches again in place.
     expect(await screen.findByText("Ripple")).toBeInTheDocument();
-    expect(screen.queryByRole("searchbox")).toBeNull();
+    const musicBox = screen.getByRole("searchbox", { name: "Search Navidrome" });
+    expect(musicBox).not.toBe(box);
+    expect(musicBox).toHaveValue("ripple");
+    fireEvent.change(musicBox, { target: { value: "wharf rat" } });
+    fireEvent.submit(musicBox.closest("form")!);
+    await waitFor(() => expect(searches).toHaveLength(2));
+    expect(searches[1]).toContain("q=wharf%20rat");
+  });
+
+  it("shows a volume change pushed by the bridge without waiting for the next poll", async () => {
+    FakeEventSource.instances = [];
+    const zones = [{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }];
+    const group = { id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/api/groups")) return json([group]);
+      if (url.endsWith("/api/zones")) return json(zones);
+      if (url.endsWith("/api/sources")) return json([]);
+      // Polls keep answering the old volume, so only the pushed event can move the slider.
+      if (url.endsWith("/api/zones/z1/volume")) return json({ id: "z1", volume: 12, muted: false });
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      return json({ groups: [group], zones });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+    const slider = await screen.findByRole("slider", { name: "Kitchen volume" });
+    await waitFor(() => expect(slider).toHaveValue("12"));
+    await waitFor(() => expect(FakeEventSource.instances.some((source) => !source.closed)).toBe(true));
+    act(() => FakeEventSource.emit({ type: "volume", payload: { groupId: "g1", zones: [{ id: "z1", volume: 31, muted: false }] }, at: new Date().toISOString() }));
+    await waitFor(() => expect(slider).toHaveValue("31"));
   });
 
   it("evens out the rooms of a group to the group volume", async () => {

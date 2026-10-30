@@ -1,4 +1,4 @@
-import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { IconMusic } from "@tabler/icons-react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -283,12 +283,7 @@ export function App() {
     }
   }, []);
 
-  const loadVolumes = useCallback(async (group: SonosGroup) => {
-    const visibleZones = group.zones.filter((zone) => zone.visible);
-    const [nextGroupVolume, nextZoneVolumes] = await Promise.all([
-      visibleZones.length > 1 ? bridgeApi.groupVolume(group.id).catch(() => null) : Promise.resolve(null),
-      Promise.all(visibleZones.map((zone) => bridgeApi.zoneVolume(zone.id).catch(() => null)))
-    ]);
+  const applyVolumes = useCallback((nextGroupVolume: VolumeState | null, nextZoneVolumes: Array<VolumeState | null>) => {
     setGroupVolume(nextGroupVolume);
     setZoneVolumes((current) => {
       const next = { ...current };
@@ -298,6 +293,15 @@ export function App() {
       return next;
     });
   }, []);
+
+  const loadVolumes = useCallback(async (group: SonosGroup) => {
+    const visibleZones = group.zones.filter((zone) => zone.visible);
+    const [nextGroupVolume, nextZoneVolumes] = await Promise.all([
+      visibleZones.length > 1 ? bridgeApi.groupVolume(group.id).catch(() => null) : Promise.resolve(null),
+      Promise.all(visibleZones.map((zone) => bridgeApi.zoneVolume(zone.id).catch(() => null)))
+    ]);
+    applyVolumes(nextGroupVolume, nextZoneVolumes);
+  }, [applyVolumes]);
 
   const loadSnapshot = useCallback(async (force = false) => {
     setState("loading");
@@ -343,8 +347,10 @@ export function App() {
   useEffect(() => subscribeBridgeEvents((event) => {
     if (event.type === "snapshot") applySnapshot(event.payload);
     if (event.type === "now-playing" && event.payload.groupId === selectedGroup?.id) setNowPlaying(event.payload);
+    // A change from elsewhere (the keyboard's volume knob), shown before the next poll.
+    if (event.type === "volume" && event.payload.groupId === selectedGroup?.id) applyVolumes(event.payload.group ?? null, event.payload.zones);
     if (event.type === "error") setMessage(event.message);
-  }, () => setMessage("Bridge event stream disconnected")), [applySnapshot, selectedGroup?.id]);
+  }, () => setMessage("Bridge event stream disconnected")), [applySnapshot, applyVolumes, selectedGroup?.id]);
 
   useEffect(() => {
     setPlaybackTick(Date.now());
@@ -782,9 +788,9 @@ export function App() {
       else return false;
     },
     "?": () => setShortcutsOpen(true),
-    // On the main screen the search box takes "/" itself; elsewhere, go there first.
+    // The main screen and Music each have a search box that takes "/"; elsewhere, go to the main screen's.
     "/": () => {
-      if (view === "main") return false;
+      if (view === "main" || view === "browse") return false;
       setView("main");
       setSearchFocusRequest((count) => count + 1);
     }
@@ -975,8 +981,6 @@ export function App() {
         </section>
       ) : view === "main" ? (
       <section className="controller-grid main-view">
-        {/* Music's search box renders here (SourceBrowser), so search starts on the main screen. */}
-        <div className="main-search" ref={setSearchSlot} />
         <section className={`now-playing${isLiveStream ? " compact" : ""}`} aria-label="Now playing">
           <div className="artwork-wrap">
             <button
@@ -1169,6 +1173,9 @@ export function App() {
             ) : null}
           </div>
         </section>
+
+        {/* Music's search box, rendered here by SourceBrowser; Enter shows the results in Music. */}
+        <div className="main-search" ref={setSearchSlot} />
 
         {showPresets && (
           <section className="presets-panel" aria-label="Radio presets">
@@ -1461,8 +1468,6 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
     return () => window.clearTimeout(timeout);
   }, [status]);
   const [searchQuery, setSearchQuery] = useState("");
-  // The query the shown results are for; the box on the main screen may hold a newer one.
-  const [submittedQuery, setSubmittedQuery] = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const [searchType, setSearchType] = useState<"song" | "artist" | "album">("song");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -1516,13 +1521,12 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
   const groupColors = useGroupColors();
   const browseGroupOptions = useMemo(() => [...buildGroupOptions(groups, groupColors), DEVICE_OPTION], [groups, groupColors]);
 
-  const runSearch = useCallback(async (overrideType?: "song" | "artist" | "album", overrideQuery?: string) => {
-    const query = (overrideQuery ?? searchQuery).trim();
+  const runSearch = useCallback(async (overrideType?: "song" | "artist" | "album") => {
+    const query = searchQuery.trim();
     if (!sourceId || !query) return;
     setLoading(true);
     setError("");
     setSearchActive(true);
-    setSubmittedQuery(query);
     setStack([]); // search is a fresh context — drop the browse breadcrumb trail
     const type = supportsTypedSearch ? (overrideType ?? searchType) : undefined;
     try {
@@ -1537,7 +1541,6 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
 
   const clearSearch = useCallback(() => {
     setSearchQuery("");
-    setSubmittedQuery("");
     setSearchActive(false);
     setData(null);
   }, []);
@@ -1770,17 +1773,20 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
             onChange={(id) => { persistSourceId(id); setStack([]); setSearchActive(false); setData(null); }}
             customIcons={customIcons}
           />
-          <input
-            ref={searchInputRef}
-            type="search"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={supportsSearch ? `Search ${activeSource?.name ?? "music"}` : `${activeSource?.name ?? "This source"} has no search`}
-            aria-label={`Search ${activeSource?.name ?? "music"}`}
-            aria-keyshortcuts="/"
-            enterKeyHint="search"
-            disabled={!supportsSearch}
-          />
+          <span className="main-search-field">
+            <Search size={18} aria-hidden="true" />
+            <input
+              ref={searchInputRef}
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={supportsSearch ? `Search ${activeSource?.name ?? "music"}` : `${activeSource?.name ?? "This source"} has no search`}
+              aria-label={`Search ${activeSource?.name ?? "music"}`}
+              aria-keyshortcuts="/"
+              enterKeyHint="search"
+              disabled={!supportsSearch}
+            />
+          </span>
           {searchActive ? (
             <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
           ) : null}
@@ -1788,12 +1794,27 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
         searchSlot
       ) : null}
 
-      {searchActive ? (
+      {/* Music's own box; it shares the query with the one on the main screen. */}
+      {supportsSearch ? (
         <div className="browse-search-label">
-          <div className="browse-search-results">
-            <span>Results for <strong>“{submittedQuery}”</strong> in {activeSource?.name ?? "this source"}</span>
-            <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
-          </div>
+          <span>Search</span>
+          <form
+            onSubmit={(event) => { event.preventDefault(); void runSearch(); }}
+            style={{ display: "flex", gap: 6 }}
+          >
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={`Search ${activeSource?.name ?? ""}`}
+              aria-label={`Search ${activeSource?.name ?? "music"}`}
+              aria-keyshortcuts="/"
+              enterKeyHint="search"
+            />
+            {searchActive ? (
+              <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
+            ) : null}
+          </form>
           {supportsTypedSearch ? (
             <div className="browse-search-types" role="tablist">
               {([
@@ -1809,7 +1830,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
                   className={searchType === entry.value ? "selected" : undefined}
                   onClick={() => {
                     setSearchType(entry.value);
-                    void runSearch(entry.value, submittedQuery);
+                    if (searchQuery.trim()) void runSearch(entry.value);
                   }}
                 >
                   {entry.label}
