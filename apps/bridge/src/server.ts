@@ -1,6 +1,6 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
-import type { AlarmInput, BridgeEvent, EqPayload, EqPreset, Favorite, NowPlaying, PlaybackMode, RecentlyViewedItem, RepeatMode, SonosGroup, SourceItemKind, TransportAction, VolumePayload } from "@misonos/sonos-protocol";
+import type { AlarmInput, BridgeEvent, EqPayload, EqPreset, Favorite, NowPlaying, PlaybackMode, RecentlyViewedItem, RepeatMode, SonosGroup, SonosZone, SourceItemKind, TransportAction, VolumePayload, VolumeState } from "@misonos/sonos-protocol";
 import type { BridgeConfig } from "./config.js";
 import { QueueReturn } from "./queueReturn.js";
 import { pickSelectedGroup, SELECTED_GROUP_PREF, stepVolume } from "./selectedRoom.js";
@@ -325,14 +325,20 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       const grouped = rooms.length > 1;
       const zoneId = rooms[0]?.id ?? group.coordinatorId;
       const current = grouped ? await service.groupVolume(group.id) : await service.zoneVolume(zoneId);
+      let result: VolumeState;
       if (body.toggleMute) {
-        return json(response, grouped ? await service.setGroupMute(group.id, !current.muted) : await service.setZoneMute(zoneId, !current.muted));
+        result = grouped ? await service.setGroupMute(group.id, !current.muted) : await service.setZoneMute(zoneId, !current.muted);
+      } else {
+        const cap = Number.parseInt(String((await store.getPreference(MAX_VOLUME_PREF))?.value ?? ""), 10);
+        const volume = stepVolume(current.volume, Number(body.delta) || 0, Number.isFinite(cap) ? cap : 100);
+        // Turning the volume while muted unmutes, as Windows does with its own volume.
+        const payload: VolumePayload = current.muted ? { volume, muted: false } : { volume };
+        result = grouped ? await service.setGroupVolume(group.id, payload) : await service.setVolume(zoneId, payload);
       }
-      const cap = Number.parseInt(String((await store.getPreference(MAX_VOLUME_PREF))?.value ?? ""), 10);
-      const volume = stepVolume(current.volume, Number(body.delta) || 0, Number.isFinite(cap) ? cap : 100);
-      // Turning the volume while muted unmutes, as Windows does with its own volume.
-      const payload: VolumePayload = current.muted ? { volume, muted: false } : { volume };
-      return json(response, grouped ? await service.setGroupVolume(group.id, payload) : await service.setVolume(zoneId, payload));
+      json(response, result);
+      // Open apps show the change now instead of at their next poll.
+      void broadcastVolumes(group.id, rooms, grouped ? result : undefined);
+      return;
     }
 
     if (request.method === "POST" && url.pathname === "/api/selected/transport") {
@@ -834,8 +840,18 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
   server.on("close", () => sonosEvents.unsubscribeAll());
   return server;
 
+  async function broadcastVolumes(groupId: string, rooms: SonosZone[], group?: VolumeState): Promise<void> {
+    try {
+      const zones = await Promise.all(rooms.map((room) => service.zoneVolume(room.id)));
+      sendEvent({ type: "volume", payload: { groupId, group, zones }, at: new Date().toISOString() });
+    } catch {
+      // The apps' next poll shows it.
+    }
+  }
+
+  // A key press can't wait out a discovery sweep, so this uses the rooms as last seen.
   async function selectedGroup(): Promise<SonosGroup> {
-    const snapshot = await service.snapshot();
+    const snapshot = await service.cachedSnapshot();
     const key = (await store.getPreference(SELECTED_GROUP_PREF))?.value;
     const group = pickSelectedGroup(snapshot.groups, typeof key === "string" ? key : undefined);
     if (!group) throw new Error("No Sonos rooms found");

@@ -279,6 +279,7 @@ export function subscribeBridgeEvents(onEvent: (event: BridgeEvent) => void, onE
   };
   source.addEventListener("snapshot", handler as EventListener);
   source.addEventListener("now-playing", handler as EventListener);
+  source.addEventListener("volume", handler as EventListener);
   source.addEventListener("error", handler as EventListener);
   source.onerror = () => {
     noteBridgeFailure();

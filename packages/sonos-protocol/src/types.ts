@@ -469,7 +469,15 @@ export interface SonosDeviceInfo {
   fetchedAt: string;
 }
 
+/** A group's volumes after a change: the group volume (for grouped rooms) and each room's. */
+export interface GroupVolumes {
+  groupId: string;
+  group?: VolumeState;
+  zones: VolumeState[];
+}
+
 export type BridgeEvent =
   | { type: "snapshot"; payload: BridgeSnapshot; at: string }
   | { type: "now-playing"; payload: NowPlaying; at: string }
+  | { type: "volume"; payload: GroupVolumes; at: string }
   | { type: "error"; message: string; at: string };

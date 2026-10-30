@@ -177,6 +177,17 @@ export class SonosService {
     return this.currentSnapshot();
   }
 
+  /**
+   * The rooms as last seen, without waiting for a sweep (snapshot() waits 2.5 s or
+   * more when the last one is over 30 s old). A stale view refreshes in the
+   * background for the next call; topology events keep it current in between.
+   */
+  async cachedSnapshot(): Promise<BridgeSnapshot> {
+    if (this.zones.size === 0) return this.snapshot();
+    if (Date.now() - this.lastDiscovery > 30_000) void this.discover().catch(() => undefined);
+    return this.currentSnapshot();
+  }
+
   private currentSnapshot(): BridgeSnapshot {
     return {
       zones: [...this.zones.values()].filter((zone) => zone.visible),
