@@ -1,8 +1,9 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
-import type { AlarmInput, BridgeEvent, EqPayload, EqPreset, Favorite, NowPlaying, PlaybackMode, RecentlyViewedItem, RepeatMode, SourceItemKind, TransportAction, VolumePayload } from "@misonos/sonos-protocol";
+import type { AlarmInput, BridgeEvent, EqPayload, EqPreset, Favorite, NowPlaying, PlaybackMode, RecentlyViewedItem, RepeatMode, SonosGroup, SourceItemKind, TransportAction, VolumePayload } from "@misonos/sonos-protocol";
 import type { BridgeConfig } from "./config.js";
 import { QueueReturn } from "./queueReturn.js";
+import { pickSelectedGroup, SELECTED_GROUP_PREF, stepVolume } from "./selectedRoom.js";
 import { SonosEventManager } from "./sonosEvents.js";
 import { SonosService } from "./sonosService.js";
 import type { Store } from "./store/index.js";
@@ -14,6 +15,8 @@ import { isKnownSource, listSourceSettings, readDisabledSources, setSourceEnable
 import path from "node:path";
 
 const SPOTIFY_ACCOUNT_PREF = "spotifySonosAccount";
+// The volume cap set in Settings (0–100), shared with the web app's sliders.
+const MAX_VOLUME_PREF = "maxVolume";
 
 type RouteHandler = (
   request: IncomingMessage,
@@ -311,6 +314,39 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       const zoneId = decodeURIComponent(volumeMatch[1]);
       if (request.method === "GET") return json(response, await service.zoneVolume(zoneId));
       if (request.method === "POST") return json(response, await service.setVolume(zoneId, await readJson<VolumePayload>(request)));
+    }
+
+    // The room selected in MiSonos, for the keyboard's media keys (selectedRoom.ts).
+    // Grouped rooms move together like the main slider: the group volume scales them.
+    if (request.method === "POST" && url.pathname === "/api/selected/volume") {
+      const body = await readJson<{ delta?: number; toggleMute?: boolean }>(request);
+      const group = await selectedGroup();
+      const rooms = group.zones.filter((zone) => zone.visible);
+      const grouped = rooms.length > 1;
+      const zoneId = rooms[0]?.id ?? group.coordinatorId;
+      const current = grouped ? await service.groupVolume(group.id) : await service.zoneVolume(zoneId);
+      if (body.toggleMute) {
+        return json(response, grouped ? await service.setGroupMute(group.id, !current.muted) : await service.setZoneMute(zoneId, !current.muted));
+      }
+      const cap = Number.parseInt(String((await store.getPreference(MAX_VOLUME_PREF))?.value ?? ""), 10);
+      const volume = stepVolume(current.volume, Number(body.delta) || 0, Number.isFinite(cap) ? cap : 100);
+      // Turning the volume while muted unmutes, as Windows does with its own volume.
+      const payload: VolumePayload = current.muted ? { volume, muted: false } : { volume };
+      return json(response, grouped ? await service.setGroupVolume(group.id, payload) : await service.setVolume(zoneId, payload));
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/selected/transport") {
+      const body = await readJson<{ action?: string }>(request);
+      const group = await selectedGroup();
+      let action = body.action;
+      if (action === "playpause") {
+        const { state } = await service.nowPlaying(group.id);
+        action = state === "PLAYING" || state === "TRANSITIONING" ? "pause" : "play";
+      }
+      if (!isTransportAction(action)) return json(response, { error: "Invalid transport action" }, 400);
+      const nowPlaying = await service.transport(group.id, action);
+      sendEvent({ type: "now-playing", payload: nowPlaying, at: new Date().toISOString() });
+      return json(response, nowPlaying);
     }
 
     const eqMatch = url.pathname.match(/^\/api\/zones\/([^/]+)\/eq$/);
@@ -797,6 +833,14 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
   });
   server.on("close", () => sonosEvents.unsubscribeAll());
   return server;
+
+  async function selectedGroup(): Promise<SonosGroup> {
+    const snapshot = await service.snapshot();
+    const key = (await store.getPreference(SELECTED_GROUP_PREF))?.value;
+    const group = pickSelectedGroup(snapshot.groups, typeof key === "string" ? key : undefined);
+    if (!group) throw new Error("No Sonos rooms found");
+    return group;
+  }
 
   async function ensureSonosSubscriptions(snapshot: Awaited<ReturnType<SonosService["snapshot"]>>): Promise<void> {
     try {

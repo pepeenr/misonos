@@ -86,6 +86,36 @@ describe("App", () => {
     await waitFor(() => expect(plays).toHaveLength(2));
   });
 
+  it("searches from the main screen and shows the results in Music", async () => {
+    window.localStorage.clear();
+    const searches: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
+      if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
+      if (url.endsWith("/api/sources")) return json([{ id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] }]);
+      if (url.endsWith("/api/sources/navidrome/browse")) return json({ id: "root", total: 1, items: [{ id: "artists", title: "Artists", kind: "container" }] });
+      if (url.includes("/api/sources/navidrome/search?")) {
+        searches.push(url);
+        return json({ id: "search", total: 1, items: [{ id: "t9", title: "Ripple", kind: "playable" }] });
+      }
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    const box = await screen.findByRole("searchbox", { name: "Search Navidrome" });
+    await waitFor(() => expect(box).not.toBeDisabled());
+    fireEvent.change(box, { target: { value: "ripple" } });
+    fireEvent.submit(box.closest("form")!);
+    await waitFor(() => expect(searches).toHaveLength(1));
+    expect(searches[0]).toContain("q=ripple");
+    // The results open in Music, which has no search box of its own.
+    expect(await screen.findByText("“ripple”")).toBeInTheDocument();
+    expect(await screen.findByText("Ripple")).toBeInTheDocument();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+
   it("evens out the rooms of a group to the group volume", async () => {
     const zones = [
       { id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true },

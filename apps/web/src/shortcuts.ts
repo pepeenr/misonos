@@ -173,7 +173,7 @@ export const SHORTCUT_GROUPS: { title: string; entries: ShortcutEntry[] }[] = [
       { keys: ["B"], label: "Music sources" },
       { keys: ["L"], label: "Library" },
       { keys: [","], label: "Settings" },
-      { keys: ["/"], label: "Search, in Music" },
+      { keys: ["/"], label: "Search" },
       { keys: ["Esc"], label: "Close, or go back" },
       { keys: ["?"], label: "This list" }
     ]
