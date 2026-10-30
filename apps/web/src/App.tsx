@@ -1,6 +1,7 @@
 import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { IconMusic } from "@tabler/icons-react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
 import { startAccessSignIn, useAccessSignedOut } from "./accessSession.js";
@@ -73,6 +74,8 @@ export function App() {
   const [statusOpen, setStatusOpen] = useState(false);
   const [message, setMessage] = useState("Ready");
   const accessSignedOut = useAccessSignedOut();
+  const [searchSlot, setSearchSlot] = useState<HTMLDivElement | null>(null);
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const [recentNudge, setRecentNudge] = useState<{ id: number; title: string; itemCount: number } | null>(null);
   const processedNudgeTokenRef = useRef<string | null>(null);
   const pendingNudgeRef = useRef<{ token: string; timer: number } | null>(null);
@@ -778,7 +781,13 @@ export function App() {
       else if (volumePopoverOpen) setVolumePopoverOpen(false);
       else return false;
     },
-    "?": () => setShortcutsOpen(true)
+    "?": () => setShortcutsOpen(true),
+    // On the main screen the search box takes "/" itself; elsewhere, go there first.
+    "/": () => {
+      if (view === "main") return false;
+      setView("main");
+      setSearchFocusRequest((count) => count + 1);
+    }
   });
 
   return (
@@ -882,6 +891,9 @@ export function App() {
           onSelectGroup={setSelectedGroupId}
           customIcons={customIcons}
           sourcesVersion={sourcesVersion}
+          searchSlot={searchSlot}
+          onSearch={() => setView("browse")}
+          searchFocusRequest={searchFocusRequest}
         />
       </section>
 
@@ -963,6 +975,8 @@ export function App() {
         </section>
       ) : view === "main" ? (
       <section className="controller-grid main-view">
+        {/* Music's search box renders here (SourceBrowser), so search starts on the main screen. */}
+        <div className="main-search" ref={setSearchSlot} />
         <section className={`now-playing${isLiveStream ? " compact" : ""}`} aria-label="Now playing">
           <div className="artwork-wrap">
             <button
@@ -1325,6 +1339,12 @@ interface SourceBrowserProps {
   onSelectGroup: (groupId: string) => void;
   customIcons: Record<string, string>;
   sourcesVersion: number;
+  /** Where the search box goes: a slot on the main screen, present while it shows. */
+  searchSlot: HTMLElement | null;
+  /** A search was submitted; its results show here, in Music. */
+  onSearch: () => void;
+  /** Bumped to focus the search box once it's on screen. */
+  searchFocusRequest: number;
 }
 
 interface BrowseCrumb {
@@ -1338,7 +1358,7 @@ function BrowseThumb({ src }: { src?: string }) {
   return <img className="browse-thumb" src={artSrc(src)} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, sourcesVersion }: SourceBrowserProps) {
+function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest }: SourceBrowserProps) {
   const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>> | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
   const sourceInitializedRef = useRef(false);
@@ -1441,8 +1461,17 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
     return () => window.clearTimeout(timeout);
   }, [status]);
   const [searchQuery, setSearchQuery] = useState("");
+  // The query the shown results are for; the box on the main screen may hold a newer one.
+  const [submittedQuery, setSubmittedQuery] = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const [searchType, setSearchType] = useState<"song" | "artist" | "album">("song");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const handledFocusRequestRef = useRef(searchFocusRequest);
+  useEffect(() => {
+    if (!searchSlot || searchFocusRequest === handledFocusRequestRef.current) return;
+    handledFocusRequestRef.current = searchFocusRequest;
+    searchInputRef.current?.focus();
+  }, [searchSlot, searchFocusRequest]);
 
   const activeSource = sources?.find((entry) => entry.id === sourceId);
   const supportsSearch = activeSource?.capabilities?.includes("search") ?? false;
@@ -1487,15 +1516,17 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
   const groupColors = useGroupColors();
   const browseGroupOptions = useMemo(() => [...buildGroupOptions(groups, groupColors), DEVICE_OPTION], [groups, groupColors]);
 
-  const runSearch = useCallback(async (overrideType?: "song" | "artist" | "album") => {
-    if (!sourceId || !searchQuery.trim()) return;
+  const runSearch = useCallback(async (overrideType?: "song" | "artist" | "album", overrideQuery?: string) => {
+    const query = (overrideQuery ?? searchQuery).trim();
+    if (!sourceId || !query) return;
     setLoading(true);
     setError("");
     setSearchActive(true);
+    setSubmittedQuery(query);
     setStack([]); // search is a fresh context — drop the browse breadcrumb trail
     const type = supportsTypedSearch ? (overrideType ?? searchType) : undefined;
     try {
-      const next = await bridgeApi.searchSource(sourceId, searchQuery.trim(), type);
+      const next = await bridgeApi.searchSource(sourceId, query, type);
       setData(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
@@ -1506,6 +1537,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
 
   const clearSearch = useCallback(() => {
     setSearchQuery("");
+    setSubmittedQuery("");
     setSearchActive(false);
     setData(null);
   }, []);
@@ -1719,25 +1751,49 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
           />
         </label>
       </div>
-      {supportsSearch ? (
+      {searchSlot ? createPortal(
+        <form
+          className="main-search-form"
+          role="search"
+          aria-label="Search music"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!supportsSearch || !searchQuery.trim()) return;
+            void runSearch();
+            onSearch();
+          }}
+        >
+          {/* Switching source keeps what's typed: it's likely meant for the new source. */}
+          <SourcePicker
+            sources={sources ?? []}
+            value={sourceId}
+            onChange={(id) => { persistSourceId(id); setStack([]); setSearchActive(false); setData(null); }}
+            customIcons={customIcons}
+          />
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={supportsSearch ? `Search ${activeSource?.name ?? "music"}` : `${activeSource?.name ?? "This source"} has no search`}
+            aria-label={`Search ${activeSource?.name ?? "music"}`}
+            aria-keyshortcuts="/"
+            enterKeyHint="search"
+            disabled={!supportsSearch}
+          />
+          {searchActive ? (
+            <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
+          ) : null}
+        </form>,
+        searchSlot
+      ) : null}
+
+      {searchActive ? (
         <div className="browse-search-label">
-          <span>Search</span>
-          <form
-            onSubmit={(event) => { event.preventDefault(); void runSearch(); }}
-            style={{ display: "flex", gap: 6 }}
-          >
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={`Search ${activeSource?.name ?? ""}`}
-              aria-keyshortcuts="/"
-              enterKeyHint="search"
-            />
-            {searchActive ? (
-              <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
-            ) : null}
-          </form>
+          <div className="browse-search-results">
+            <span>Results for <strong>“{submittedQuery}”</strong> in {activeSource?.name ?? "this source"}</span>
+            <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
+          </div>
           {supportsTypedSearch ? (
             <div className="browse-search-types" role="tablist">
               {([
@@ -1753,7 +1809,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
                   className={searchType === entry.value ? "selected" : undefined}
                   onClick={() => {
                     setSearchType(entry.value);
-                    if (searchQuery.trim()) void runSearch(entry.value);
+                    void runSearch(entry.value, submittedQuery);
                   }}
                 >
                   {entry.label}
