@@ -1967,6 +1967,27 @@ h2 {
   margin-bottom: 0;
 }
 
+/* The whole row toggles, out over the card's 14px padding, so a collapsed card
+   toggles wherever it's tapped. */
+.section-heading.toggles {
+  margin: -14px -14px 12px;
+  padding: 14px 14px 0;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.section-heading.toggles.collapsed {
+  margin-bottom: -14px;
+  padding-bottom: 14px;
+}
+
+@media (hover: hover) {
+  .section-heading.toggles:hover:not(:has(.heading-actions button:hover)) .section-toggle {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
 .section-toggle {
   display: inline-flex;
   align-items: center;

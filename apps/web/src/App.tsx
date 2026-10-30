@@ -21,6 +21,7 @@ import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
 import { pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
+import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
@@ -1208,46 +1209,31 @@ export function App() {
 
         {!isLiveStream && (
         <section className="queue-panel" aria-label="Queue">
-          <div className={queueCollapsed ? "section-heading collapsed" : "section-heading"}>
-            <h2>
-              <button
-                type="button"
-                className="section-toggle"
-                aria-expanded={!queueCollapsed}
-                aria-keyshortcuts="Q"
-                title={queueCollapsed ? "Show the queue (Q)" : "Hide the queue (Q)"}
-                onClick={toggleQueueCollapsed}
-              >
-                <ChevronDown size={16} className="section-toggle-icon" aria-hidden="true" />
-                Queue
-              </button>
-            </h2>
-            <div className="heading-actions">
-              <button
-                className="icon-button compact"
-                type="button"
-                title="Save queue as playlist (Shift+Q)"
-                aria-label="Save queue as playlist"
-                aria-keyshortcuts="Shift+Q"
-                disabled={effectiveQueue.length === 0 || localMode || !selectedGroup}
-                onClick={() => void saveQueueAsPlaylist()}
-              >
-                <Plus size={16} />
-              </button>
-              <button
-                className="icon-button compact"
-                type="button"
-                title="Clear queue (Shift+Delete)"
-                aria-label="Clear queue"
-                aria-keyshortcuts="Shift+Delete Shift+Backspace"
-                disabled={effectiveQueue.length === 0 || (!localMode && !selectedGroup)}
-                onClick={() => void clearQueueItems()}
-              >
-                <Trash2 size={16} />
-              </button>
-              <span>{effectiveQueue.length}</span>
-            </div>
-          </div>
+          <CollapsibleHeading title="Queue" collapsed={queueCollapsed} onToggle={toggleQueueCollapsed} shortcut="Q" what="the queue">
+            <button
+              className="icon-button compact"
+              type="button"
+              title="Save queue as playlist (Shift+Q)"
+              aria-label="Save queue as playlist"
+              aria-keyshortcuts="Shift+Q"
+              disabled={effectiveQueue.length === 0 || localMode || !selectedGroup}
+              onClick={() => void saveQueueAsPlaylist()}
+            >
+              <Plus size={16} />
+            </button>
+            <button
+              className="icon-button compact"
+              type="button"
+              title="Clear queue (Shift+Delete)"
+              aria-label="Clear queue"
+              aria-keyshortcuts="Shift+Delete Shift+Backspace"
+              disabled={effectiveQueue.length === 0 || (!localMode && !selectedGroup)}
+              onClick={() => void clearQueueItems()}
+            >
+              <Trash2 size={16} />
+            </button>
+            <span>{effectiveQueue.length}</span>
+          </CollapsibleHeading>
           {queueCollapsed ? null : !localMode && queueState === "loading" ? (
             <div className="empty-panel">Loading queue...</div>
           ) : !localMode && queueState === "error" ? (

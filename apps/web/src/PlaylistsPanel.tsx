@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { NowPlaying, SourceBrowseItem } from "@misonos/sonos-protocol";
 import { artSrc, bridgeApi } from "./api.js";
+import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { useLocalPlayer } from "./localPlayer.js";
 import type { PlaylistSource } from "./playlists.js";
 import { ServiceIcon } from "./SourcePicker.js";
@@ -108,40 +109,25 @@ export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleC
 
   return (
     <section className="queue-panel playlists-panel" aria-label="Playlists">
-      <div className={collapsed ? "section-heading collapsed" : "section-heading"}>
-        <h2>
+      <CollapsibleHeading title="Playlists" collapsed={collapsed} onToggle={onToggleCollapsed} shortcut="Shift+L" what="playlists">
+        <span className="playlists-source">
+          <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
+          {source.name}
+        </span>
+        {!collapsed ? (
           <button
+            className="icon-button compact"
             type="button"
-            className="section-toggle"
-            aria-expanded={!collapsed}
-            aria-keyshortcuts="Shift+L"
-            title={collapsed ? "Show playlists (Shift+L)" : "Hide playlists (Shift+L)"}
-            onClick={onToggleCollapsed}
+            title="Refresh playlists"
+            aria-label="Refresh playlists"
+            disabled={loading}
+            onClick={() => setRefreshNonce((nonce) => nonce + 1)}
           >
-            <ChevronDown size={16} className="section-toggle-icon" aria-hidden="true" />
-            Playlists
+            <RefreshCw size={16} className={loading ? "spin" : undefined} />
           </button>
-        </h2>
-        <div className="heading-actions">
-          <span className="playlists-source">
-            <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
-            {source.name}
-          </span>
-          {!collapsed ? (
-            <button
-              className="icon-button compact"
-              type="button"
-              title="Refresh playlists"
-              aria-label="Refresh playlists"
-              disabled={loading}
-              onClick={() => setRefreshNonce((nonce) => nonce + 1)}
-            >
-              <RefreshCw size={16} className={loading ? "spin" : undefined} />
-            </button>
-          ) : null}
-          <span>{playlists?.length ?? ""}</span>
-        </div>
-      </div>
+        ) : null}
+        <span>{playlists?.length ?? ""}</span>
+      </CollapsibleHeading>
       {collapsed ? null : (
         <div className="playlists-body">
           {error ? (

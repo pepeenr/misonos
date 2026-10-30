@@ -91,6 +91,12 @@ describe("App", () => {
     expect(container.querySelector(".queue-list")).toBeNull();
     fireEvent.keyDown(document.body, { key: "q" });
     expect(queueToggle).toHaveAttribute("aria-expanded", "true");
+    // Anywhere on the title row toggles too, but not the row's own buttons.
+    const queueHeading = queueToggle.closest(".section-heading")!;
+    fireEvent.click(queueHeading.querySelector(".heading-actions > span")!);
+    expect(queueToggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(queueHeading);
+    expect(queueToggle).toHaveAttribute("aria-expanded", "true");
 
     fireEvent.click(tile);
     await waitFor(() => expect(plays).toHaveLength(1));
@@ -98,6 +104,14 @@ describe("App", () => {
     await waitFor(() => expect(tile).not.toBeDisabled());
     fireEvent.keyDown(document.body, { key: "1", code: "Digit1" });
     await waitFor(() => expect(plays).toHaveLength(2));
+
+    const playlistsToggle = screen.getByRole("button", { name: "Playlists" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh playlists" }));
+    expect(playlistsToggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(playlistsToggle.closest(".section-heading")!.querySelector(".playlists-source")!);
+    expect(playlistsToggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(playlistsToggle);
+    expect(playlistsToggle).toHaveAttribute("aria-expanded", "true");
   });
 
   it("searches from the main screen and shows the results in Music", async () => {
