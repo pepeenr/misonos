@@ -156,11 +156,16 @@ describe("App", () => {
     FakeEventSource.instances = [];
     const searches: string[] = [];
     const imports: unknown[] = [];
+    let playlistLoads = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
       if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
       if (url.endsWith("/api/sources")) return json([{ id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] }]);
-      if (url.endsWith("/api/sources/navidrome/browse")) return json({ id: "root", total: 1, items: [{ id: "artists", title: "Artists", kind: "container" }] });
+      if (url.endsWith("/api/sources/navidrome/browse")) return json({ id: "root", total: 2, items: [{ id: "artists", title: "Artists", kind: "container" }, { id: "playlists", title: "Playlists", kind: "container" }] });
+      if (url.endsWith("/browse?id=playlists")) {
+        playlistLoads += 1;
+        return json({ id: "playlists", total: 1, items: [{ id: "pl:1", title: "Road Trip", kind: "album" }] });
+      }
       if (url.includes("/search?")) {
         searches.push(url);
         return json({ id: "search", total: 0, items: [] });
@@ -177,6 +182,7 @@ describe("App", () => {
     render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
 
     const box = await screen.findByRole("searchbox", { name: "Search Navidrome" });
+    await screen.findByRole("button", { name: "Play Road Trip" });
     await waitFor(() => expect(box).toHaveAttribute("placeholder", "Search Navidrome or paste a YouTube link"));
     const card = within(box.closest(".main-search") as HTMLElement);
     fireEvent.change(box, { target: { value: "https://youtu.be/aaaaaaaaaaa" } });
@@ -190,6 +196,7 @@ describe("App", () => {
     await waitFor(() => expect(box).toHaveValue(""));
     expect(card.getByRole("status")).toHaveTextContent("Looking up the YouTube link…");
 
+    const loadsBefore = playlistLoads;
     act(() => FakeEventSource.emit({
       type: "youtube-import",
       at: "2026-11-03T10:00:05Z",
@@ -204,6 +211,8 @@ describe("App", () => {
       }
     }));
     expect(card.getByRole("status")).toHaveTextContent("Playing “Ripple”.");
+    // The song is in the YouTube playlist now, so the playlists card loaded its list again.
+    await waitFor(() => expect(playlistLoads).toBeGreaterThan(loadsBefore));
     fireEvent.click(card.getByRole("button", { name: "Dismiss" }));
     expect(card.queryByRole("status")).toBeNull();
   });

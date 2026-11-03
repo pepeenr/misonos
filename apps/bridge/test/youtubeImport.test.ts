@@ -63,10 +63,11 @@ describe("YouTubeImporter", () => {
   });
 
   // Navidrome "has" a song once Downtify has downloaded it, after `lag` searches.
-  function setup(songs: DowntifySong[], options: { failDownload?: string; lag?: number; ownTitles?: Record<string, string>; mix?: DowntifySong[] | Error } = {}) {
+  function setup(songs: DowntifySong[], options: { failDownload?: string; lag?: number; ownTitles?: Record<string, string>; mix?: DowntifySong[] | Error; playlistFails?: boolean } = {}) {
     const downloaded = new Set<string>();
     const searches = new Map<string, number>();
-    const downloads: Array<{ song: DowntifySong; playlist: string }> = [];
+    const downloads: Array<{ song: DowntifySong }> = [];
+    const added: string[] = [];
     const plays: Array<{ trackIds: string[]; groupId: string; mode: PlaybackMode }> = [];
     const events: YouTubeImportJob[] = [];
     const resolved: string[] = [];
@@ -93,8 +94,8 @@ describe("YouTubeImporter", () => {
         if (options.mix instanceof Error) throw options.mix;
         return options.mix ?? [];
       },
-      download: async (song, playlist) => {
-        downloads.push({ song, playlist });
+      download: async (song) => {
+        downloads.push({ song });
         if (song.song_id === options.failDownload) throw new Error("Video unavailable");
         downloaded.add(song.name ?? "");
         return `YouTube/${song.name}.opus`;
@@ -115,6 +116,10 @@ describe("YouTubeImporter", () => {
         plays.push({ trackIds, groupId, mode });
         return { groupId, state: "PLAYING", updatedAt: new Date().toISOString() } as NowPlaying;
       },
+      addToPlaylist: async (trackIds) => {
+        if (options.playlistFails) throw new Error("Navidrome: HTTP 500");
+        added.push(...trackIds);
+      },
       onChange: (job) => {
         events.push(structuredClone(job));
         if (job.finishedAt) finished(structuredClone(job));
@@ -126,7 +131,7 @@ describe("YouTubeImporter", () => {
       findPollMs: 1,
       findTimeoutMs: 200
     });
-    return { importer, downloads, plays, events, done, resolved, similar, tokenUsed: () => tokenUsed };
+    return { importer, downloads, added, plays, events, done, resolved, similar, tokenUsed: () => tokenUsed };
   }
 
   it("pairs with a Downtify code and keeps the token", async () => {
@@ -143,7 +148,7 @@ describe("YouTubeImporter", () => {
 
   it("downloads a video into the playlist, waits for Navidrome, and plays it", async () => {
     const song = { song_id: "aaaaaaaaaaa", name: "Ripple", artists: ["Grateful Dead"], duration: 250, url: "https://music.youtube.com/watch?v=aaaaaaaaaaa" };
-    const { importer, downloads, plays, done, tokenUsed } = setup([song], { lag: 2 });
+    const { importer, downloads, added, plays, done, tokenUsed } = setup([song], { lag: 2 });
     await importer.pair("123456");
 
     const started = await importer.start({ url: "https://www.youtube.com/watch?v=aaaaaaaaaaa", groupId: "g1" });
@@ -151,7 +156,8 @@ describe("YouTubeImporter", () => {
     const job = await done;
 
     expect(tokenUsed()).toBe("dtfy_1_secret");
-    expect(downloads).toEqual([{ song, playlist: "YouTube" }]);
+    expect(downloads).toEqual([{ song }]);
+    expect(added).toEqual(["nd:aaaaaaaaaaa"]);
     expect(plays).toEqual([{ trackIds: ["nd:aaaaaaaaaaa"], groupId: "g1", mode: "replace" }]);
     expect(job).toMatchObject({ status: "done", tracks: [{ title: "Ripple", artist: "Grateful Dead", status: "playing" }] });
     expect(importer.recent()[0].id).toBe(started.id);
@@ -211,11 +217,21 @@ describe("YouTubeImporter", () => {
   });
 
   it("only saves the songs when no room is given", async () => {
-    const { importer, plays, done } = setup([{ song_id: "aaaaaaaaaaa", name: "Ripple", duration: 250 }]);
+    const { importer, plays, added, done } = setup([{ song_id: "aaaaaaaaaaa", name: "Ripple", duration: 250 }]);
     await importer.pair("123456");
     await importer.start({ url: "https://youtu.be/aaaaaaaaaaa" });
     expect((await done).tracks[0].status).toBe("saved");
+    expect(added).toEqual(["nd:aaaaaaaaaaa"]);
     expect(plays).toEqual([]);
+  });
+
+  it("still plays a song the playlist couldn't take, and says so", async () => {
+    const { importer, plays, done } = setup([{ song_id: "aaaaaaaaaaa", name: "Ripple", duration: 250 }], { playlistFails: true });
+    await importer.pair("123456");
+    await importer.start({ url: "https://youtu.be/aaaaaaaaaaa", groupId: "g1" });
+    const job = await done;
+    expect(plays).toHaveLength(1);
+    expect(job).toMatchObject({ status: "done", note: "Couldn't add songs to the YouTube playlist: Navidrome: HTTP 500." });
   });
 
   it("gives up on a song Navidrome never lists", async () => {

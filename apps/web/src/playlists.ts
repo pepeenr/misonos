@@ -2,6 +2,16 @@ import { useEffect, useState } from "react";
 import type { SourceBrowseItem, SourceDescriptor } from "@misonos/sonos-protocol";
 import { bridgeApi } from "./api.js";
 
+// The playlists card's lists. Playlists rarely change, and the main screen remounts the
+// card on every return to it, so a list is reused for a while instead of fetched each time.
+export const PLAYLISTS_CACHE_TTL_MS = 10 * 60 * 1000;
+export const playlistsCache = new Map<string, { items: SourceBrowseItem[]; at: number }>();
+
+/** Forget the cached lists, so the card loads them afresh (a YouTube link added songs). */
+export function forgetPlaylists(): void {
+  playlistsCache.clear();
+}
+
 export interface PlaylistSource {
   source: SourceDescriptor;
   /** Browse id of the source's Playlists folder. */

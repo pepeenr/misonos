@@ -22,7 +22,7 @@ import { describeImport, describeLink, isYouTubeLink } from "./youtube.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
-import { pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
+import { forgetPlaylists, pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
@@ -81,6 +81,14 @@ export function App() {
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   // The latest YouTube import, from this device or another, shown under the search box.
   const [youtubeJob, setYoutubeJob] = useState<YouTubeImportJob | null>(null);
+  // Each song an import adds lands in the YouTube playlist: the playlists card reloads.
+  const [playlistsReload, setPlaylistsReload] = useState(0);
+  const youtubeAdded = youtubeJob?.tracks.filter((track) => track.status === "playing" || track.status === "queued" || track.status === "saved").length ?? 0;
+  useEffect(() => {
+    if (youtubeAdded === 0) return;
+    forgetPlaylists();
+    setPlaylistsReload((count) => count + 1);
+  }, [youtubeAdded, youtubeJob?.id]);
   const [recentNudge, setRecentNudge] = useState<{ id: number; title: string; itemCount: number } | null>(null);
   const processedNudgeTokenRef = useRef<string | null>(null);
   const pendingNudgeRef = useRef<{ token: string; timer: number } | null>(null);
@@ -1288,6 +1296,7 @@ export function App() {
             onToggleCollapsed={togglePlaylistsCollapsed}
             onPlayed={onPlaylistPlayed}
             customIcons={customIcons}
+            reloadKey={playlistsReload}
           />
         ) : null}
       </section>

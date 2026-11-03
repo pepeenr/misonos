@@ -43,11 +43,11 @@ async function fakeDowntify(reply: (seen: Seen) => { status: number; body: strin
 }
 
 describe("DowntifyClient", () => {
-  it("sends the Host header and token, and asks for a download into the playlist", async () => {
+  it("sends the Host header and token, and asks for that exact video", async () => {
     const fake = await fakeDowntify(() => ({ status: 200, body: JSON.stringify("YouTube/Ripple.opus") }));
     const client = new DowntifyClient({ url: fake.url, host: "downtify.example" }, "dtfy_1_secret");
 
-    const file = await client.download({ song_id: "aaaaaaaaaaa", name: "Ripple", url: "https://music.youtube.com/watch?v=aaaaaaaaaaa" }, "YouTube");
+    const file = await client.download({ song_id: "aaaaaaaaaaa", name: "Ripple", url: "https://music.youtube.com/watch?v=aaaaaaaaaaa" });
 
     expect(file).toBe("YouTube/Ripple.opus");
     const [request] = fake.seen;
@@ -57,7 +57,7 @@ describe("DowntifyClient", () => {
     const query = new URL(request.url ?? "", "http://x").searchParams;
     expect(query.get("url")).toBe("https://music.youtube.com/watch?v=aaaaaaaaaaa");
     expect(query.get("client_id")).toBe("misonos");
-    expect(JSON.parse(request.body)).toEqual({ playlist_name: "YouTube", youtube_id: "aaaaaaaaaaa" });
+    expect(JSON.parse(request.body)).toEqual({ youtube_id: "aaaaaaaaaaa" });
   });
 
   it("resolves a link to a list of songs, one or many", async () => {

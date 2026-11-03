@@ -123,6 +123,16 @@ export async function browseSource(sourceId: string, id?: string): Promise<Sourc
   };
 }
 
+/** Adds tracks to a playlist of the source's own (Navidrome: MiSonos's YouTube playlist). */
+export async function appendToSourcePlaylist(sourceId: string, name: string, trackIds: string[]): Promise<{ id: string; added: number }> {
+  const config = requireConfig(sourceId);
+  return fetchJson<{ id: string; added: number }>(new URL("/playlist/append", config.baseUrl), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, ids: trackIds })
+  });
+}
+
 export async function fetchTrack(sourceId: string, id: string): Promise<SourceTrackInfo> {
   const config = requireConfig(sourceId);
   const target = new URL("/track", config.baseUrl);

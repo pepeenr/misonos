@@ -5,9 +5,9 @@ import type { NowPlaying, PlaybackMode, SourceBrowseItem, YouTubeImportJob, YouT
 import { DowntifyClient, DowntifyError, type DowntifyEndpoint, type DowntifyPairing, type DowntifySong } from "./downtify.js";
 
 // Paste a YouTube link, hear it on the speakers. Downtify downloads each song into the
-// Navidrome library and adds it to one playlist ("YouTube"); once Navidrome has it,
-// MiSonos plays it from Navidrome like any other track. The first song plays as soon as
-// it's in, and the rest join the queue behind it as they arrive.
+// Navidrome library; once Navidrome has it, MiSonos adds it to one Navidrome playlist
+// ("YouTube") and plays it from Navidrome like any other track. The first song plays as
+// soon as it's in, and the rest join the queue behind it as they arrive.
 
 // How long a downloaded song may take to show up in Navidrome's search: Downtify asks
 // Navidrome to scan, and Navidrome's own file watcher would notice it too.
@@ -25,7 +25,7 @@ export interface DowntifyApi {
   pair(code: string, deviceName: string): Promise<DowntifyPairing>;
   resolve(link: string): Promise<DowntifySong[]>;
   similar(artist: string, track: string, limit: number): Promise<DowntifySong[]>;
-  download(song: DowntifySong, playlist: string): Promise<string>;
+  download(song: DowntifySong): Promise<string>;
 }
 
 export interface YouTubeImporterOptions {
@@ -37,6 +37,8 @@ export interface YouTubeImporterOptions {
   search: (query: string) => Promise<SourceBrowseItem[]>;
   /** Plays Navidrome tracks on a group. */
   play: (trackIds: string[], groupId: string, mode: PlaybackMode) => Promise<NowPlaying>;
+  /** Adds Navidrome tracks to the playlist. */
+  addToPlaylist: (trackIds: string[]) => Promise<unknown>;
   onChange: (job: YouTubeImportJob) => void;
   client?: (endpoint: DowntifyEndpoint, token?: string) => DowntifyApi;
   findTimeoutMs?: number;
@@ -143,10 +145,14 @@ export class YouTubeImporter {
           const song: DowntifySong = { ...listed, ...own };
           track.title = song.name || track.title;
           track.artist = artistOf(song) ?? track.artist;
-          await client.download(song, this.options.playlist);
+          await client.download(song);
           track.status = "finding";
           this.emit(job);
           const trackId = await this.find(song);
+          // A song that plays but missed the playlist is still worth having: say so once.
+          await this.options.addToPlaylist([trackId]).catch((error: unknown) => {
+            job.note ??= `Couldn't add songs to the ${this.options.playlist} playlist: ${errorText(error)}.`;
+          });
           if (!job.groupId) {
             track.status = "saved";
           } else {

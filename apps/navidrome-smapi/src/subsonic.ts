@@ -71,7 +71,7 @@ export interface SubsonicResults {
 
 export type AlbumListType = "newest" | "recent" | "frequent" | "random" | "alphabeticalByName";
 
-type Params = Record<string, string | number | boolean | undefined>;
+type Params = Record<string, string | number | boolean | string[] | undefined>;
 
 export class SubsonicError extends Error {
   constructor(message: string, readonly code?: number) {
@@ -102,9 +102,16 @@ export class SubsonicClient {
     url.searchParams.set("c", CLIENT_NAME);
     url.searchParams.set("f", "json");
     for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
+      // A list repeats the parameter (songIdToAdd=…&songIdToAdd=…).
+      if (Array.isArray(value)) for (const item of value) url.searchParams.append(key, item);
+      else if (value !== undefined) url.searchParams.set(key, String(value));
     }
     return url;
+  }
+
+  /** Who this client signs in as: playlists it may change are the ones this user owns. */
+  get username(): string {
+    return this.server.username;
   }
 
   // Checks the server answers and accepts the credentials (error code 40 if not).
@@ -152,6 +159,15 @@ export class SubsonicClient {
 
   async playlist(id: string): Promise<SubsonicPlaylist> {
     return (await this.get<{ playlist: SubsonicPlaylist }>("getPlaylist", { id })).playlist;
+  }
+
+  /** A new playlist of this user's; the server answers with it (OpenSubsonic, Navidrome). */
+  async createPlaylist(name: string, songIds: string[]): Promise<SubsonicPlaylist | undefined> {
+    return (await this.get<{ playlist?: SubsonicPlaylist }>("createPlaylist", { name, songId: songIds })).playlist;
+  }
+
+  async updatePlaylist(id: string, change: { songIdToAdd?: string[]; public?: boolean }): Promise<void> {
+    await this.get("updatePlaylist", { playlistId: id, songIdToAdd: change.songIdToAdd, public: change.public });
   }
 
   async song(id: string): Promise<SubsonicSong> {
