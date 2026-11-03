@@ -165,7 +165,7 @@ describe("App", () => {
         searches.push(url);
         return json({ id: "search", total: 0, items: [] });
       }
-      if (url.endsWith("/api/youtube/status")) return json({ available: true, paired: true, username: "pepe", playlist: "YouTube" });
+      if (url.endsWith("/api/youtube/status")) return json({ available: true, paired: true, username: "pepe", playlist: "YouTube", mixSongs: 10 });
       if (url.endsWith("/api/youtube/import")) {
         imports.push(JSON.parse(String(init?.body)));
         return json({ id: "job1", url: "https://youtu.be/aaaaaaaaaaa", groupId: "g1", status: "resolving", tracks: [], startedAt: "2026-11-03T10:00:00Z" });

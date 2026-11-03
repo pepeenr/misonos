@@ -486,6 +486,8 @@ export interface YouTubeImportStatus {
   username?: string;
   /** The Navidrome playlist the songs are added to. */
   playlist: string;
+  /** How many songs from a YouTube Mix come along with the one linked. */
+  mixSongs: number;
 }
 
 export interface YouTubeImportTrack {
@@ -504,6 +506,8 @@ export interface YouTubeImportJob {
   status: "resolving" | "running" | "done" | "failed";
   tracks: YouTubeImportTrack[];
   error?: string;
+  /** Something worth saying that didn't stop the import, e.g. a Mix that couldn't be read. */
+  note?: string;
   startedAt: string;
   finishedAt?: string;
 }

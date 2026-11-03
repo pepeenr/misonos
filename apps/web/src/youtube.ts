@@ -14,10 +14,30 @@ export function isYouTubeLink(text: string): boolean {
   }
 }
 
+/**
+ * What a link brings, as the bridge reads it (youtubeImport.ts youtubeLink): a video
+ * opened from a playlist means the playlist, and a Mix (list=RD…) the song and what
+ * YouTube Music's radio plays after it.
+ */
+export function youtubeLinkKind(text: string): "video" | "playlist" | "mix" {
+  const list = new URL(text.trim()).searchParams.get("list");
+  if (!list) return "video";
+  return list.startsWith("RD") && !list.startsWith("RDCLAK5uy_") ? "mix" : "playlist";
+}
+
+/** What Enter will do with a pasted link. */
+export function describeLink(text: string, options: { play: boolean; playlist: string; mixSongs: number }): string {
+  const kind = youtubeLinkKind(text);
+  const what = kind === "mix" ? `the song and the next ${options.mixSongs} from its Mix` : kind === "playlist" ? "the playlist" : "it";
+  if (!options.play) return `Enter gets ${what} from YouTube into the ${options.playlist} playlist.`;
+  return kind === "mix" ? `Enter gets ${what}, and plays them.` : `Enter gets ${what} from YouTube and plays it.`;
+}
+
 /** One line on how an import is going, for under the search box. */
 export function describeImport(job: YouTubeImportJob, playlist: string): string {
   const total = job.tracks.length;
   if (job.status === "resolving") return "Looking up the YouTube link…";
+  const note = job.note ? ` ${job.note}` : "";
   if (job.status === "failed") return `Couldn't get it from YouTube: ${job.error ?? "something went wrong"}`;
   if (job.status === "running") {
     const current = job.tracks.find((track) => track.status === "downloading" || track.status === "finding");
@@ -37,5 +57,5 @@ export function describeImport(job: YouTubeImportJob, playlist: string): string 
   else line = got.length === 1 ? `Queued “${first.title}”.` : `Queued ${got.length} songs.`;
   if (failed.length === 1) line += ` “${failed[0].title}” failed: ${failed[0].error ?? "unknown error"}`;
   else if (failed.length > 1) line += ` ${failed.length} songs failed.`;
-  return line;
+  return line + note;
 }

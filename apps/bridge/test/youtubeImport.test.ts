@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NowPlaying, PlaybackMode, SourceBrowseItem, YouTubeImportJob } from "@misonos/sonos-protocol";
 import type { DowntifySong } from "../src/downtify.js";
-import { isYouTubeLink, pickTrack, YouTubeImporter, YouTubeImportError, type DowntifyApi } from "../src/youtubeImport.js";
+import { isYouTubeLink, MIX_SONGS, pickTrack, youtubeLink, YouTubeImporter, YouTubeImportError, type DowntifyApi } from "../src/youtubeImport.js";
 
 const ENDPOINT = { url: "http://127.0.0.1", host: "downtify.example" };
 
@@ -20,6 +20,17 @@ describe("isYouTubeLink", () => {
     expect(isYouTubeLink("https://m.youtube.com/shorts/abc")).toBe(true);
     expect(isYouTubeLink("https://notyoutube.com/watch?v=1")).toBe(false);
     expect(isYouTubeLink("never gonna give you up")).toBe(false);
+  });
+});
+
+describe("youtubeLink", () => {
+  it("takes a video in a playlist as the playlist, and a Mix as its song", () => {
+    expect(youtubeLink("https://youtu.be/aaaaaaaaaaa")).toEqual({ kind: "video", resolve: "https://youtu.be/aaaaaaaaaaa" });
+    expect(youtubeLink("https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLxyz&index=3")).toEqual({ kind: "playlist", resolve: "https://www.youtube.com/playlist?list=PLxyz" });
+    expect(youtubeLink("https://www.youtube.com/watch?v=_ltWsgnR9Gw&list=RD_ltWsgnR9Gw&start_radio=1")).toEqual({ kind: "mix", resolve: "https://www.youtube.com/watch?v=_ltWsgnR9Gw" });
+    expect(youtubeLink("https://www.youtube.com/playlist?list=RD_ltWsgnR9Gw").kind).toBe("mix");
+    // YouTube Music's curated playlists start with RD too, but aren't radio.
+    expect(youtubeLink("https://music.youtube.com/playlist?list=RDCLAK5uy_abc").kind).toBe("playlist");
   });
 });
 
@@ -52,12 +63,14 @@ describe("YouTubeImporter", () => {
   });
 
   // Navidrome "has" a song once Downtify has downloaded it, after `lag` searches.
-  function setup(songs: DowntifySong[], options: { failDownload?: string; lag?: number; ownTitles?: Record<string, string> } = {}) {
+  function setup(songs: DowntifySong[], options: { failDownload?: string; lag?: number; ownTitles?: Record<string, string>; mix?: DowntifySong[] | Error } = {}) {
     const downloaded = new Set<string>();
     const searches = new Map<string, number>();
     const downloads: Array<{ song: DowntifySong; playlist: string }> = [];
     const plays: Array<{ trackIds: string[]; groupId: string; mode: PlaybackMode }> = [];
     const events: YouTubeImportJob[] = [];
+    const resolved: string[] = [];
+    const similar: unknown[][] = [];
     let tokenUsed: string | undefined;
     let finished: (job: YouTubeImportJob) => void = () => undefined;
     const done = new Promise<YouTubeImportJob>((resolve) => { finished = resolve; });
@@ -67,12 +80,18 @@ describe("YouTubeImporter", () => {
         return { token: "dtfy_1_secret", user: { username: "pepe" } };
       },
       resolve: async (link) => {
+        resolved.push(link);
         const id = new URL(link).searchParams.get("v");
         if (id) {
           const song = songs.find((entry) => entry.song_id === id);
           return song ? [{ ...song, name: options.ownTitles?.[id] ?? song.name }] : [];
         }
         return songs;
+      },
+      similar: async (...args) => {
+        similar.push(args);
+        if (options.mix instanceof Error) throw options.mix;
+        return options.mix ?? [];
       },
       download: async (song, playlist) => {
         downloads.push({ song, playlist });
@@ -107,12 +126,12 @@ describe("YouTubeImporter", () => {
       findPollMs: 1,
       findTimeoutMs: 200
     });
-    return { importer, downloads, plays, events, done, tokenUsed: () => tokenUsed };
+    return { importer, downloads, plays, events, done, resolved, similar, tokenUsed: () => tokenUsed };
   }
 
   it("pairs with a Downtify code and keeps the token", async () => {
     const { importer } = setup([]);
-    expect(await importer.status()).toEqual({ available: true, paired: false, username: undefined, playlist: "YouTube" });
+    expect(await importer.status()).toEqual({ available: true, paired: false, username: undefined, playlist: "YouTube", mixSongs: MIX_SONGS });
     await expect(importer.start({ url: "https://youtu.be/aaaaaaaaaaa", groupId: "g1" })).rejects.toMatchObject({ status: 409 });
 
     expect(await importer.pair(" 123 456 ")).toMatchObject({ paired: true, username: "pepe" });
@@ -155,6 +174,40 @@ describe("YouTubeImporter", () => {
     expect(job.tracks.map((entry) => entry.status)).toEqual(["playing", "failed", "queued"]);
     expect(job.tracks[1].error).toBe("Video unavailable");
     expect(job.tracks[2].title).toBe("Song 3 (Official Audio)");
+  });
+
+  it("gets a Mix's song and the songs after it", async () => {
+    const seed = { song_id: "aaaaaaaaaaa", name: "Kto je dežo", artists: ["Marhule"], duration: 200 };
+    const after = Array.from({ length: 12 }, (_, index) => ({ song_id: `m${String(index).padStart(10, "0")}`, name: `Mix ${index + 1}`, duration: 180 }));
+    // The radio may lead with the seed itself; it isn't downloaded twice.
+    const { importer, downloads, plays, done, resolved, similar } = setup([seed, ...after], { mix: [seed, ...after] });
+    await importer.pair("123456");
+
+    await importer.start({ url: "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=RDaaaaaaaaaaa&start_radio=1", groupId: "g1" });
+    const job = await done;
+
+    expect(resolved[0]).toBe("https://www.youtube.com/watch?v=aaaaaaaaaaa");
+    expect(similar).toEqual([["Marhule", "Kto je dežo", MIX_SONGS]]);
+    expect(downloads.map((entry) => entry.song.name)).toEqual(["Kto je dežo", ...after.slice(0, MIX_SONGS).map((song) => song.name)]);
+    expect(plays.map((entry) => entry.mode)).toEqual(["replace", ...Array(MIX_SONGS).fill("end")]);
+    expect(job.status).toBe("done");
+  });
+
+  it("still gets a Mix's song when the radio can't be read", async () => {
+    const { importer, downloads, done } = setup([{ song_id: "aaaaaaaaaaa", name: "Ripple", duration: 250 }], { mix: new Error("YouTube Music did not answer") });
+    await importer.pair("123456");
+    await importer.start({ url: "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=RDaaaaaaaaaaa", groupId: "g1" });
+    const job = await done;
+    expect(downloads).toHaveLength(1);
+    expect(job).toMatchObject({ status: "done", note: "Only the song: its Mix couldn't be read (YouTube Music did not answer)." });
+  });
+
+  it("asks for the whole playlist when the video was opened from one", async () => {
+    const { importer, resolved, done } = setup([{ song_id: "aaaaaaaaaaa", name: "Ripple", duration: 250 }]);
+    await importer.pair("123456");
+    await importer.start({ url: "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLxyz", groupId: "g1" });
+    await done;
+    expect(resolved[0]).toBe("https://www.youtube.com/playlist?list=PLxyz");
   });
 
   it("only saves the songs when no room is given", async () => {
