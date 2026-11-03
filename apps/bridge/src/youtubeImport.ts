@@ -15,6 +15,8 @@ const FIND_TIMEOUT_MS = 90_000;
 const FIND_POLL_MS = 2_000;
 // Imports kept for GET /api/youtube/imports.
 const KEEP_JOBS = 10;
+// A Mix is endless radio: the linked song comes with this many of the songs after it.
+export const MIX_SONGS = 10;
 // A song's length in Navidrome can be a second or two off YouTube's.
 const DURATION_SLACK_S = 3;
 const YOUTUBE_HOSTS = /(^|\.)(youtube\.com|youtu\.be)$/i;
@@ -22,6 +24,7 @@ const YOUTUBE_HOSTS = /(^|\.)(youtube\.com|youtu\.be)$/i;
 export interface DowntifyApi {
   pair(code: string, deviceName: string): Promise<DowntifyPairing>;
   resolve(link: string): Promise<DowntifySong[]>;
+  similar(artist: string, track: string, limit: number): Promise<DowntifySong[]>;
   download(song: DowntifySong, playlist: string): Promise<string>;
 }
 
@@ -64,7 +67,8 @@ export class YouTubeImporter {
       available: Boolean(this.options.endpoint),
       paired: Boolean(this.options.endpoint && pairing),
       username: pairing?.username,
-      playlist: this.options.playlist
+      playlist: this.options.playlist,
+      mixSongs: MIX_SONGS
     };
   }
 
@@ -120,8 +124,10 @@ export class YouTubeImporter {
   private async run(job: YouTubeImportJob, client: DowntifyApi, mode: "replace" | "end"): Promise<void> {
     this.emit(job);
     try {
-      const songs = (await client.resolve(job.url)).filter((song) => song.url || song.song_id);
+      const link = youtubeLink(job.url);
+      let songs = (await client.resolve(link.resolve)).filter((song) => song.url || song.song_id);
       if (songs.length === 0) throw new YouTubeImportError("Downtify found no songs at that link", 404);
+      if (link.kind === "mix") songs = await this.withMix(client, songs[0], job);
       job.tracks = songs.map((song) => ({ title: song.name || "Untitled", artist: artistOf(song), status: "waiting" }));
       job.status = "running";
       this.emit(job);
@@ -163,6 +169,20 @@ export class YouTubeImporter {
     }
     job.finishedAt = new Date().toISOString();
     this.emit(job);
+  }
+
+  // The linked song, then what YouTube Music's radio plays after it. Downtify finds the
+  // radio from the artist and title, so it can differ a little from the Mix on YouTube.
+  private async withMix(client: DowntifyApi, seed: DowntifySong, job: YouTubeImportJob): Promise<DowntifySong[]> {
+    try {
+      const after = await client.similar(seed.artists?.[0] ?? "", seed.name ?? "", MIX_SONGS);
+      const seen = new Set([seed.song_id]);
+      const more = after.filter((song) => song.song_id && !seen.has(song.song_id) && seen.add(song.song_id));
+      return [seed, ...more.slice(0, MIX_SONGS)];
+    } catch (error) {
+      job.note = `Only the song: its Mix couldn't be read (${errorText(error)}).`;
+      return [seed];
+    }
   }
 
   // Waits for Navidrome to list the downloaded song, and answers with its track id.
@@ -213,6 +233,29 @@ export function isYouTubeLink(text: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * What a link is, and the link to ask Downtify about. A video opened from a playlist
+ * (watch?v=…&list=PL…) means the playlist; Downtify alone would take just the video.
+ * A Mix (list=RD…, YouTube's endless radio for a song) is the song and what follows it.
+ */
+export function youtubeLink(text: string): { kind: "video" | "playlist" | "mix"; resolve: string } {
+  const url = new URL(text.trim());
+  const list = url.searchParams.get("list");
+  const video = url.searchParams.get("v") ?? (/youtu\.be$/i.test(url.hostname) ? url.pathname.slice(1) : undefined);
+  if (!list) return { kind: "video", resolve: text.trim() };
+  if (isRadioMix(list)) {
+    // A song's own Mix is "RD" + its video id.
+    const seed = video || (/^RD[A-Za-z0-9_-]{11}$/.test(list) ? list.slice(2) : undefined);
+    return seed ? { kind: "mix", resolve: `https://www.youtube.com/watch?v=${seed}` } : { kind: "video", resolve: text.trim() };
+  }
+  return { kind: "playlist", resolve: `https://www.youtube.com/playlist?list=${encodeURIComponent(list)}` };
+}
+
+// "RD…" lists are generated radio; "RDCLAK5uy_…" ones are YouTube Music's curated playlists.
+function isRadioMix(list: string): boolean {
+  return list.startsWith("RD") && !list.startsWith("RDCLAK5uy_");
 }
 
 /** The Navidrome track that is this song: same title and length, the artist breaking a tie. */

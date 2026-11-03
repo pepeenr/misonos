@@ -55,6 +55,13 @@ export class DowntifyClient {
     return Array.isArray(result) ? result : [result];
   }
 
+  /** What YouTube Music's radio plays after a song: its Mix, found from the artist and title. */
+  async similar(artist: string, track: string, limit: number): Promise<DowntifySong[]> {
+    const query = new URLSearchParams({ artist, track, limit: String(limit) });
+    const result = await this.call<{ tracks?: DowntifySong[] }>("GET", `/api/similar/tracks?${query}`);
+    return result.tracks ?? [];
+  }
+
   /** Downloads `song` into `playlist`, and answers with its file name once it's on disk. */
   download(song: DowntifySong, playlist: string): Promise<string> {
     const videoId = song.song_id && VIDEO_ID.test(song.song_id) ? song.song_id : undefined;

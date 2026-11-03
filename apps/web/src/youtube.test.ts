@@ -1,6 +1,6 @@
 import type { YouTubeImportJob, YouTubeImportTrack } from "@misonos/sonos-protocol";
 import { describe, expect, it } from "vitest";
-import { describeImport, isYouTubeLink } from "./youtube.js";
+import { describeImport, describeLink, isYouTubeLink } from "./youtube.js";
 
 function job(status: YouTubeImportJob["status"], tracks: YouTubeImportTrack[], extra: Partial<YouTubeImportJob> = {}): YouTubeImportJob {
   return { id: "j", url: "https://youtu.be/x", groupId: "g1", status, tracks, startedAt: "2026-11-03T10:00:00Z", ...extra };
@@ -13,6 +13,18 @@ describe("isYouTubeLink", () => {
     expect(isYouTubeLink("youtu.be/dQw4w9WgXcQ")).toBe(false);
     expect(isYouTubeLink("youtube")).toBe(false);
     expect(isYouTubeLink("https://example.com/youtube.com")).toBe(false);
+  });
+});
+
+describe("describeLink", () => {
+  const options = { play: true, playlist: "YouTube", mixSongs: 10 };
+
+  it("says what a video, a playlist and a Mix bring", () => {
+    expect(describeLink("https://youtu.be/aaaaaaaaaaa", options)).toBe("Enter gets it from YouTube and plays it.");
+    expect(describeLink("https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLxyz", options)).toBe("Enter gets the playlist from YouTube and plays it.");
+    expect(describeLink("https://www.youtube.com/watch?v=aaaaaaaaaaa&list=RDaaaaaaaaaaa&start_radio=1", options))
+      .toBe("Enter gets the song and the next 10 from its Mix, and plays them.");
+    expect(describeLink("https://youtu.be/aaaaaaaaaaa", { ...options, play: false })).toBe("Enter gets it from YouTube into the YouTube playlist.");
   });
 });
 
@@ -37,5 +49,7 @@ describe("describeImport", () => {
     expect(describeImport(job("done", [{ title: "One", status: "saved" }, { title: "Two", status: "saved" }], { groupId: undefined }), "YouTube"))
       .toBe("Saved 2 songs to the YouTube playlist.");
     expect(describeImport(job("failed", [], { error: "Unsupported URL" }), "YouTube")).toBe("Couldn't get it from YouTube: Unsupported URL");
+    expect(describeImport(job("done", [{ title: "One", status: "playing" }], { note: "Only the song: its Mix couldn't be read (x)." }), "YouTube"))
+      .toBe("Playing “One”. Only the song: its Mix couldn't be read (x).");
   });
 });

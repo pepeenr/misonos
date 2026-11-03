@@ -71,6 +71,14 @@ describe("DowntifyClient", () => {
     expect(fake.seen[0].authorization).toBeUndefined();
   });
 
+  it("asks for a song's radio by artist and title", async () => {
+    const fake = await fakeDowntify(() => ({ status: 200, body: JSON.stringify({ artist: "A", track: "T", tracks: [{ name: "Next" }] }) }));
+    const client = new DowntifyClient({ url: fake.url }, "dtfy_1_secret");
+
+    expect(await client.similar("Grateful Dead", "Ripple", 10)).toEqual([{ name: "Next" }]);
+    expect(fake.seen[0].url).toBe("/api/similar/tracks?artist=Grateful+Dead&track=Ripple&limit=10");
+  });
+
   it("passes on Downtify's own error, and names a non-JSON answer by its status", async () => {
     const fake = await fakeDowntify((seen) => seen.url === "/api/auth/pair"
       ? { status: 401, body: JSON.stringify({ detail: "Wrong or expired pairing code" }) }

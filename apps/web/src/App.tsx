@@ -18,7 +18,7 @@ import { useLocalPlayer, type LocalTrack } from "./localPlayer.js";
 import { ServiceIcon, SourcePicker } from "./SourcePicker.js";
 import { SpotifySettings } from "./SpotifySettings.js";
 import { YouTubeSettings } from "./YouTubeSettings.js";
-import { describeImport, isYouTubeLink } from "./youtube.js";
+import { describeImport, describeLink, isYouTubeLink } from "./youtube.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
@@ -1523,9 +1523,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
       ? {
           text: !youtube?.paired
             ? "Pair MiSonos with Downtify in Settings → YouTube links to get songs from YouTube."
-            : youtubeGroupId
-              ? "Enter gets it from YouTube and plays it."
-              : `Enter gets it from YouTube into the ${youtube.playlist} playlist.`,
+            : describeLink(searchQuery, { play: Boolean(youtubeGroupId), playlist: youtube.playlist, mixSongs: youtube.mixSongs }),
           tone: "hint",
           dismissable: false
         }
