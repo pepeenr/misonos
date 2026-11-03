@@ -9,6 +9,10 @@ export interface BridgeConfig {
   pollIntervalMs: number;
   manualSpeakerIps: string[];
   dbPath: string;
+  /** Where Downtify answers, for getting songs from YouTube; unset hides the feature. */
+  downtify?: { url: string; host?: string };
+  /** The Navidrome playlist YouTube songs are added to. */
+  youtubePlaylist: string;
 }
 
 export function loadConfig(env = process.env): BridgeConfig {
@@ -22,6 +26,12 @@ export function loadConfig(env = process.env): BridgeConfig {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    dbPath: env.MISONOS_BRIDGE_DB ?? path.join(homedir(), ".misonos", "misonos.db")
+    dbPath: env.MISONOS_BRIDGE_DB ?? path.join(homedir(), ".misonos", "misonos.db"),
+    // The Host header is for reaching Downtify through a reverse proxy on the same box
+    // (Traefik on 127.0.0.1 routes by host name), past anything in front of its domain.
+    downtify: env.MISONOS_DOWNTIFY_URL
+      ? { url: env.MISONOS_DOWNTIFY_URL, host: env.MISONOS_DOWNTIFY_HOST || undefined }
+      : undefined,
+    youtubePlaylist: env.MISONOS_YOUTUBE_PLAYLIST || "YouTube"
   };
 }

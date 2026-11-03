@@ -1,5 +1,5 @@
 import type { BridgeEvent } from "@misonos/sonos-protocol";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
 import { DialogProvider } from "./dialogs.js";
@@ -149,6 +149,63 @@ describe("App", () => {
     fireEvent.submit(musicBox.closest("form")!);
     await waitFor(() => expect(searches).toHaveLength(2));
     expect(searches[1]).toContain("q=wharf%20rat");
+  });
+
+  it("gets a pasted YouTube link instead of searching for it, and shows how it's going", async () => {
+    window.localStorage.clear();
+    FakeEventSource.instances = [];
+    const searches: string[] = [];
+    const imports: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
+      if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
+      if (url.endsWith("/api/sources")) return json([{ id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] }]);
+      if (url.endsWith("/api/sources/navidrome/browse")) return json({ id: "root", total: 1, items: [{ id: "artists", title: "Artists", kind: "container" }] });
+      if (url.includes("/search?")) {
+        searches.push(url);
+        return json({ id: "search", total: 0, items: [] });
+      }
+      if (url.endsWith("/api/youtube/status")) return json({ available: true, paired: true, username: "pepe", playlist: "YouTube" });
+      if (url.endsWith("/api/youtube/import")) {
+        imports.push(JSON.parse(String(init?.body)));
+        return json({ id: "job1", url: "https://youtu.be/aaaaaaaaaaa", groupId: "g1", status: "resolving", tracks: [], startedAt: "2026-11-03T10:00:00Z" });
+      }
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    const box = await screen.findByRole("searchbox", { name: "Search Navidrome" });
+    await waitFor(() => expect(box).toHaveAttribute("placeholder", "Search Navidrome or paste a YouTube link"));
+    const card = within(box.closest(".main-search") as HTMLElement);
+    fireEvent.change(box, { target: { value: "https://youtu.be/aaaaaaaaaaa" } });
+    expect(card.getByRole("status")).toHaveTextContent("Enter gets it from YouTube and plays it.");
+    fireEvent.submit(box.closest("form")!);
+
+    await waitFor(() => expect(imports).toEqual([{ url: "https://youtu.be/aaaaaaaaaaa", groupId: "g1" }]));
+    expect(searches).toEqual([]);
+    // It stays on the main screen, the box emptied, with the import's progress under it.
+    expect(box).toBeVisible();
+    await waitFor(() => expect(box).toHaveValue(""));
+    expect(card.getByRole("status")).toHaveTextContent("Looking up the YouTube link…");
+
+    act(() => FakeEventSource.emit({
+      type: "youtube-import",
+      at: "2026-11-03T10:00:05Z",
+      payload: {
+        id: "job1",
+        url: "https://youtu.be/aaaaaaaaaaa",
+        groupId: "g1",
+        status: "done",
+        tracks: [{ title: "Ripple", artist: "Grateful Dead", status: "playing" }],
+        startedAt: "2026-11-03T10:00:00Z",
+        finishedAt: "2026-11-03T10:00:05Z"
+      }
+    }));
+    expect(card.getByRole("status")).toHaveTextContent("Playing “Ripple”.");
+    fireEvent.click(card.getByRole("button", { name: "Dismiss" }));
+    expect(card.queryByRole("status")).toBeNull();
   });
 
   it("shows a volume change pushed by the bridge without waiting for the next poll", async () => {

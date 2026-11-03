@@ -476,8 +476,41 @@ export interface GroupVolumes {
   zones: VolumeState[];
 }
 
+/** Getting YouTube songs through Downtify, which saves them into Navidrome. */
+export interface YouTubeImportStatus {
+  /** A Downtify address is configured (MISONOS_DOWNTIFY_URL). */
+  available: boolean;
+  /** MiSonos holds a Downtify app token. */
+  paired: boolean;
+  /** The Downtify account the token belongs to. */
+  username?: string;
+  /** The Navidrome playlist the songs are added to. */
+  playlist: string;
+}
+
+export interface YouTubeImportTrack {
+  title: string;
+  artist?: string;
+  /** waiting → downloading → finding (in Navidrome) → playing / queued / saved, or failed. */
+  status: "waiting" | "downloading" | "finding" | "playing" | "queued" | "saved" | "failed";
+  error?: string;
+}
+
+export interface YouTubeImportJob {
+  id: string;
+  url: string;
+  /** Unset: the songs are only saved, not played. */
+  groupId?: string;
+  status: "resolving" | "running" | "done" | "failed";
+  tracks: YouTubeImportTrack[];
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
 export type BridgeEvent =
   | { type: "snapshot"; payload: BridgeSnapshot; at: string }
   | { type: "now-playing"; payload: NowPlaying; at: string }
   | { type: "volume"; payload: GroupVolumes; at: string }
+  | { type: "youtube-import"; payload: YouTubeImportJob; at: string }
   | { type: "error"; message: string; at: string };

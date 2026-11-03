@@ -27,6 +27,13 @@ services:
       # Optional: which Spotify account linked in the Sonos app plays Spotify items.
       # Unset, it's read off your Sonos Favorites (and can be picked in Settings).
       MISONOS_SPOTIFY_SN: "${MISONOS_SPOTIFY_SN:-}"
+      # Optional: a Downtify server, for pasting YouTube links. Downtify downloads the
+      # songs into the music folder Navidrome scans; MiSonos then plays them from
+      # Navidrome. MISONOS_DOWNTIFY_HOST is the Host header to send, for reaching it
+      # through a reverse proxy on this box (e.g. URL http://127.0.0.1, HOST its domain).
+      MISONOS_DOWNTIFY_URL: "${MISONOS_DOWNTIFY_URL:-}"
+      MISONOS_DOWNTIFY_HOST: "${MISONOS_DOWNTIFY_HOST:-}"
+      MISONOS_YOUTUBE_PLAYLIST: "${MISONOS_YOUTUBE_PLAYLIST:-YouTube}"
       # Writable SQLite store (preferences, recently-viewed, EQ presets). WAL
       # sidecars (misonos.db-wal/-shm) live alongside it in ./data.
       MISONOS_BRIDGE_DB: "/data/misonos.db"
