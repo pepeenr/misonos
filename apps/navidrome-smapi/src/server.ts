@@ -171,6 +171,18 @@ export function createServer(config: NavidromeConfig, savedLogin?: SavedLogin): 
         if (!query) return sendJson(response, 400, { error: "Missing q" });
         return sendJson(response, 200, await browser.search(query, base));
       }
+      // MiSonos's own playlists (the songs got from YouTube links): POST {name, ids}.
+      if (request.method === "POST" && url.pathname === "/playlist/append") {
+        const body = await readJson<{ name?: unknown; ids?: unknown }>(request);
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === "string") : [];
+        if (!name || ids.length === 0) return sendJson(response, 400, { error: "name and ids[] are required" });
+        try {
+          return sendJson(response, 200, await browser.appendToPlaylist(name, ids));
+        } catch (error) {
+          return sendJson(response, 502, { error: errorMessage(error) });
+        }
+      }
       if (request.method === "GET" && url.pathname === "/track") {
         const id = url.searchParams.get("id");
         if (!id) return sendJson(response, 400, { error: "Missing id" });

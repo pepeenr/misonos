@@ -62,14 +62,16 @@ export class DowntifyClient {
     return result.tracks ?? [];
   }
 
-  /** Downloads `song` into `playlist`, and answers with its file name once it's on disk. */
-  download(song: DowntifySong, playlist: string): Promise<string> {
+  /** Downloads `song`, and answers with its file name once it's on disk. */
+  download(song: DowntifySong): Promise<string> {
     const videoId = song.song_id && VIDEO_ID.test(song.song_id) ? song.song_id : undefined;
     const url = song.url || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
     const query = new URLSearchParams({ url, client_id: "misonos" });
     // youtube_id pins the video itself, so Downtify doesn't match it to another upload.
+    // No playlist_name: Downtify's playlists only take songs with a Spotify id, so a
+    // YouTube song never reached its M3U. The bridge keeps the playlist in Navidrome.
     return this.call<string>("POST", `/api/download/url?${query}`, {
-      body: { playlist_name: playlist, ...(videoId ? { youtube_id: videoId } : {}) },
+      body: videoId ? { youtube_id: videoId } : {},
       timeoutMs: DOWNLOAD_TIMEOUT_MS
     });
   }

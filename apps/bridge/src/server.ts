@@ -11,7 +11,7 @@ import { proxyStream } from "./streamProxy.js";
 import { subscribeMeter } from "./meter.js";
 import { serveArt } from "./artProxy.js";
 import { deleteSourceIcon, listSourceIcons, saveSourceIcon, serveSourceIcon } from "./sourceIcons.js";
-import { isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled, sourceClearConfig, sourceConfig, sourceSaveConfig, SourceRequestError } from "./sources.js";
+import { appendToSourcePlaylist, isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled, sourceClearConfig, sourceConfig, sourceSaveConfig, SourceRequestError } from "./sources.js";
 import { YouTubeImporter, YouTubeImportError } from "./youtubeImport.js";
 import path from "node:path";
 
@@ -120,6 +120,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       sendEvent({ type: "now-playing", payload: nowPlaying, at: new Date().toISOString() });
       return nowPlaying;
     },
+    addToPlaylist: (trackIds) => appendToSourcePlaylist("navidrome", config.youtubePlaylist, trackIds),
     onChange: (job) => sendEvent({ type: "youtube-import", payload: job, at: new Date().toISOString() })
   });
 

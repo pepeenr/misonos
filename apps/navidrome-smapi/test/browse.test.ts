@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { NavidromeBrowser } from "../src/browse.js";
+import { encodeId } from "../src/ids.js";
 import { SubsonicClient, SubsonicError } from "../src/subsonic.js";
 
 const SERVER = { serverUrl: "http://nd:4533", username: "me", password: "secret" };
@@ -122,5 +123,44 @@ describe("NavidromeBrowser", () => {
     expect(track.mimeType).toBe("audio/mpeg");
     expect(track.albumArtUri).toBe(`${BASE}/art?id=al-1&size=300`);
     expect(JSON.stringify(track)).not.toContain("nd:4533");
+  });
+
+  it("makes the playlist, public, when this user has none by that name", async () => {
+    const seen: URL[] = [];
+    // Another user's public "YouTube" playlist isn't ours to change.
+    const nd = browser({
+      getPlaylists: { playlists: { playlist: [{ id: "pl-other", name: "YouTube", owner: "admin" }] } },
+      createPlaylist: { playlist: { id: "pl-new", name: "YouTube", owner: "me" } },
+      updatePlaylist: {}
+    }, seen);
+
+    const ids = ["s1", "s2", "s1"].map((songId) => encodeId({ kind: "track", songId }));
+    expect(await nd.appendToPlaylist("YouTube", ids)).toEqual({ id: "pl-new", added: 2 });
+
+    const create = seen.find((url) => url.pathname.endsWith("/createPlaylist"))!;
+    expect(create.searchParams.get("name")).toBe("YouTube");
+    expect(create.searchParams.getAll("songId")).toEqual(["s1", "s2"]);
+    const update = seen.find((url) => url.pathname.endsWith("/updatePlaylist"))!;
+    expect(update.searchParams.get("playlistId")).toBe("pl-new");
+    expect(update.searchParams.get("public")).toBe("true");
+  });
+
+  it("adds only the songs the playlist doesn't have yet", async () => {
+    const seen: URL[] = [];
+    const nd = browser({
+      getPlaylists: { playlists: { playlist: [{ id: "pl-1", name: "YouTube", owner: "me" }] } },
+      getPlaylist: { playlist: { id: "pl-1", name: "YouTube", entry: [{ id: "s1", title: "One" }] } },
+      updatePlaylist: {}
+    }, seen);
+
+    const ids = ["s1", "s3"].map((songId) => encodeId({ kind: "track", songId }));
+    expect(await nd.appendToPlaylist("YouTube", ids)).toEqual({ id: "pl-1", added: 1 });
+    const update = seen.find((url) => url.pathname.endsWith("/updatePlaylist"))!;
+    expect(update.searchParams.getAll("songIdToAdd")).toEqual(["s3"]);
+    expect(seen.some((url) => url.pathname.endsWith("/createPlaylist"))).toBe(false);
+
+    seen.length = 0;
+    expect(await nd.appendToPlaylist("YouTube", [encodeId({ kind: "track", songId: "s1" })])).toEqual({ id: "pl-1", added: 0 });
+    expect(seen.some((url) => url.pathname.endsWith("/updatePlaylist"))).toBe(false);
   });
 });

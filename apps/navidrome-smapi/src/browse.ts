@@ -28,6 +28,8 @@ interface CacheEntry<T> { value: T; expires: number }
 
 export class NavidromeBrowser {
   private cache = new Map<string, CacheEntry<unknown>>();
+  // One playlist change at a time, so two at once can't both create the playlist.
+  private playlistChanges: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly api: SubsonicClient, private readonly options: { transcodeFormat: string }) {}
 
@@ -42,6 +44,38 @@ export class NavidromeBrowser {
   async search(query: string, base: string): Promise<SourceBrowseResponse> {
     const items = resultSections(await this.api.search(query), base);
     return { id: `search:${query}`, title: `“${query}”`, total: items.length, items };
+  }
+
+  /**
+   * Adds tracks to this user's playlist `name`, leaving out any already in it. With no
+   * such playlist it makes one, public like the imported ones, so every Navidrome user
+   * sees it.
+   */
+  appendToPlaylist(name: string, rawIds: string[]): Promise<{ id: string; added: number }> {
+    const change = this.playlistChanges.then(() => this.append(name, rawIds));
+    this.playlistChanges = change.catch(() => undefined);
+    return change;
+  }
+
+  private async append(name: string, rawIds: string[]): Promise<{ id: string; added: number }> {
+    const songIds = [...new Set(rawIds.map((rawId) => {
+      const id = decodeId(rawId);
+      if (id.kind !== "track") throw new Error("Not a track id");
+      return id.songId;
+    }))];
+    const own = async () => (await this.api.playlists()).find((playlist) => playlist.name === name && playlist.owner === this.api.username);
+    this.cache.delete("playlists");
+    const existing = await own();
+    if (!existing) {
+      const created = (await this.api.createPlaylist(name, songIds)) ?? (await own());
+      if (!created) throw new Error(`Navidrome didn't make the ${name} playlist`);
+      await this.api.updatePlaylist(created.id, { public: true });
+      return { id: created.id, added: songIds.length };
+    }
+    const have = new Set((await this.api.playlist(existing.id)).entry?.map((song) => song.id));
+    const fresh = songIds.filter((id) => !have.has(id));
+    if (fresh.length) await this.api.updatePlaylist(existing.id, { songIdToAdd: fresh });
+    return { id: existing.id, added: fresh.length };
   }
 
   async track(rawId: string, base: string): Promise<SourceTrackInfo> {

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type { NowPlaying, SourceBrowseItem } from "@misonos/sonos-protocol";
 import { artSrc, bridgeApi } from "./api.js";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { useLocalPlayer } from "./localPlayer.js";
-import type { PlaylistSource } from "./playlists.js";
+import { PLAYLISTS_CACHE_TTL_MS as CACHE_TTL_MS, playlistsCache as cache, type PlaylistSource } from "./playlists.js";
 import { ServiceIcon } from "./SourcePicker.js";
 
 interface PlaylistsPanelProps {
@@ -17,14 +17,12 @@ interface PlaylistsPanelProps {
   onToggleCollapsed: () => void;
   onPlayed: (nowPlaying: NowPlaying) => void;
   customIcons: Record<string, string>;
+  /** Bumped when a playlist changed elsewhere (a YouTube link added songs): load the list again. */
+  reloadKey?: number;
 }
 
 // Tiles shown before "Show all": about two rows on a wide screen.
 const PREVIEW_COUNT = 12;
-// Playlists rarely change, and the main screen remounts this card on every return to
-// it, so a list is reused for a while instead of fetched each time.
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const cache = new Map<string, { items: SourceBrowseItem[]; at: number }>();
 
 async function playableTracks(sourceId: string, item: SourceBrowseItem): Promise<SourceBrowseItem[]> {
   const expansion = await bridgeApi.browseSource(sourceId, item.id);
@@ -39,7 +37,7 @@ function PlaylistArt({ src, title }: { src?: string; title: string }) {
 
 // The main screen's grid of the chosen source's playlists. A tile replaces the queue
 // with the playlist and plays it.
-export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleCollapsed, onPlayed, customIcons }: PlaylistsPanelProps) {
+export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleCollapsed, onPlayed, customIcons, reloadKey = 0 }: PlaylistsPanelProps) {
   const { source, folderId } = entry;
   const cacheKey = `${source.id}:${folderId}`;
   const localPlayer = useLocalPlayer();
@@ -47,6 +45,12 @@ export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleC
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const seenReloadRef = useRef(reloadKey);
+  useEffect(() => {
+    if (reloadKey === seenReloadRef.current) return;
+    seenReloadRef.current = reloadKey;
+    setRefreshNonce((nonce) => nonce + 1);
+  }, [reloadKey]);
   const [showAll, setShowAll] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
