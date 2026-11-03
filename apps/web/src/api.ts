@@ -1,4 +1,4 @@
-import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus, TransportAction, VolumePayload, VolumeState } from "@misonos/sonos-protocol";
+import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus, TransportAction, VolumePayload, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { noteBridgeFailure } from "./accessSession.js";
 import { apiUrl } from "./servers.js";
 
@@ -168,6 +168,13 @@ export const bridgeApi = {
     const typeParam = type ? `&type=${encodeURIComponent(type)}` : "";
     return request<SourceBrowseResponse>(`/api/sources/${encodeURIComponent(sourceId)}/search?q=${encodeURIComponent(query)}${typeParam}`);
   },
+  // Pasted YouTube links, which Downtify downloads into Navidrome (bridge youtubeImport.ts).
+  youtubeStatus: () => request<YouTubeImportStatus>("/api/youtube/status"),
+  pairYouTube: (code: string) =>
+    request<YouTubeImportStatus>("/api/youtube/pair", { method: "POST", body: JSON.stringify({ code }) }),
+  unpairYouTube: () => request<YouTubeImportStatus>("/api/youtube/unpair", { method: "POST", body: "{}" }),
+  importYouTube: (body: { url: string; groupId?: string; mode?: PlaybackMode }) =>
+    request<YouTubeImportJob>("/api/youtube/import", { method: "POST", body: JSON.stringify(body) }),
   sourceAuthStatus: (sourceId: string) =>
     request<{ cookieAuth?: "signed-in" | "signed-out" }>(`/api/sources/${encodeURIComponent(sourceId)}/auth/status`),
   sourceAuthSetCookies: (sourceId: string, paste: string) =>
@@ -280,6 +287,7 @@ export function subscribeBridgeEvents(onEvent: (event: BridgeEvent) => void, onE
   source.addEventListener("snapshot", handler as EventListener);
   source.addEventListener("now-playing", handler as EventListener);
   source.addEventListener("volume", handler as EventListener);
+  source.addEventListener("youtube-import", handler as EventListener);
   source.addEventListener("error", handler as EventListener);
   source.onerror = () => {
     noteBridgeFailure();

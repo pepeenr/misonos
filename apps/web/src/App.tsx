@@ -2,7 +2,7 @@ import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, Gri
 import { IconMusic } from "@tabler/icons-react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState } from "@misonos/sonos-protocol";
+import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
 import { startAccessSignIn, useAccessSignedOut } from "./accessSession.js";
 import { artSrc, bridgeApi, subscribeBridgeEvents } from "./api.js";
@@ -17,6 +17,8 @@ import { VuMeter } from "./VuMeter.js";
 import { useLocalPlayer, type LocalTrack } from "./localPlayer.js";
 import { ServiceIcon, SourcePicker } from "./SourcePicker.js";
 import { SpotifySettings } from "./SpotifySettings.js";
+import { YouTubeSettings } from "./YouTubeSettings.js";
+import { describeImport, isYouTubeLink } from "./youtube.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
@@ -77,6 +79,8 @@ export function App() {
   const accessSignedOut = useAccessSignedOut();
   const [searchSlot, setSearchSlot] = useState<HTMLDivElement | null>(null);
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
+  // The latest YouTube import, from this device or another, shown under the search box.
+  const [youtubeJob, setYoutubeJob] = useState<YouTubeImportJob | null>(null);
   const [recentNudge, setRecentNudge] = useState<{ id: number; title: string; itemCount: number } | null>(null);
   const processedNudgeTokenRef = useRef<string | null>(null);
   const pendingNudgeRef = useRef<{ token: string; timer: number } | null>(null);
@@ -350,8 +354,20 @@ export function App() {
     if (event.type === "now-playing" && event.payload.groupId === selectedGroup?.id) setNowPlaying(event.payload);
     // A change from elsewhere (the keyboard's volume knob), shown before the next poll.
     if (event.type === "volume" && event.payload.groupId === selectedGroup?.id) applyVolumes(event.payload.group ?? null, event.payload.zones);
+    if (event.type === "youtube-import") {
+      const job = event.payload;
+      setYoutubeJob((current) => (!current || current.id === job.id || job.startedAt >= current.startedAt ? job : current));
+    }
     if (event.type === "error") setMessage(event.message);
   }, () => setMessage("Bridge event stream disconnected")), [applySnapshot, applyVolumes, selectedGroup?.id]);
+
+  // A finished import's line goes after a while; a failed one stays until dismissed.
+  useEffect(() => {
+    if (youtubeJob?.status !== "done") return undefined;
+    const id = youtubeJob.id;
+    const timer = window.setTimeout(() => setYoutubeJob((current) => (current?.id === id ? null : current)), 20_000);
+    return () => window.clearTimeout(timer);
+  }, [youtubeJob]);
 
   useEffect(() => {
     setPlaybackTick(Date.now());
@@ -901,6 +917,8 @@ export function App() {
           searchSlot={searchSlot}
           onSearch={() => setView("browse")}
           searchFocusRequest={searchFocusRequest}
+          youtubeJob={youtubeJob}
+          onYouTubeJob={setYoutubeJob}
         />
       </section>
 
@@ -943,6 +961,7 @@ export function App() {
           <AboutSystem />
           <YouTubeMusicAuth />
           <SpotifySettings onSourcesChanged={() => setSourcesVersion((version) => version + 1)} />
+          <YouTubeSettings onChanged={() => setSourcesVersion((version) => version + 1)} />
           <CustomMusicServices
             zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)}
             customIcons={customIcons}
@@ -1338,6 +1357,9 @@ interface SourceBrowserProps {
   onSearch: () => void;
   /** Bumped to focus the search box once it's on screen. */
   searchFocusRequest: number;
+  /** The latest YouTube import, told about under the search box. */
+  youtubeJob: YouTubeImportJob | null;
+  onYouTubeJob: (job: YouTubeImportJob | null) => void;
 }
 
 interface BrowseCrumb {
@@ -1351,7 +1373,7 @@ function BrowseThumb({ src }: { src?: string }) {
   return <img className="browse-thumb" src={artSrc(src)} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest }: SourceBrowserProps) {
+function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
   const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>> | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
   const sourceInitializedRef = useRef(false);
@@ -1467,6 +1489,63 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
   const activeSource = sources?.find((entry) => entry.id === sourceId);
   const supportsSearch = activeSource?.capabilities?.includes("search") ?? false;
   const supportsTypedSearch = sourceId === "youtube-music";
+
+  // A pasted YouTube link is got from YouTube (Downtify downloads it into Navidrome)
+  // instead of searched for, and plays on the picked room.
+  const [youtube, setYoutube] = useState<YouTubeImportStatus | null>(null);
+  const [youtubeNote, setYoutubeNote] = useState("");
+  useEffect(() => {
+    void bridgeApi.youtubeStatus().then(setYoutube).catch(() => setYoutube(null));
+  }, [sourcesVersion]);
+  const queryIsYouTube = Boolean(youtube?.available) && isYouTubeLink(searchQuery);
+  // "This device" isn't a Sonos room: the songs are then only saved to the playlist.
+  const youtubeGroupId = selectedGroupId && selectedGroupId !== LOCAL_DEVICE_ID ? selectedGroupId : undefined;
+  const changeQuery = (value: string) => {
+    setSearchQuery(value);
+    setYoutubeNote("");
+  };
+  const getFromYouTube = useCallback(async () => {
+    if (!youtube?.paired) {
+      setYoutubeNote("Pair MiSonos with Downtify in Settings → YouTube links first.");
+      return;
+    }
+    try {
+      onYouTubeJob(await bridgeApi.importYouTube({ url: searchQuery.trim(), groupId: youtubeGroupId }));
+      setSearchQuery("");
+      setYoutubeNote("");
+    } catch (err) {
+      setYoutubeNote(err instanceof Error ? err.message : "Couldn't start the download");
+    }
+  }, [youtube?.paired, searchQuery, youtubeGroupId, onYouTubeJob]);
+  const youtubeLine = youtubeNote
+    ? { text: youtubeNote, tone: "error", dismissable: false }
+    : queryIsYouTube
+      ? {
+          text: !youtube?.paired
+            ? "Pair MiSonos with Downtify in Settings → YouTube links to get songs from YouTube."
+            : youtubeGroupId
+              ? "Enter gets it from YouTube and plays it."
+              : `Enter gets it from YouTube into the ${youtube.playlist} playlist.`,
+          tone: "hint",
+          dismissable: false
+        }
+      : youtubeJob
+        ? {
+            text: describeImport(youtubeJob, youtube?.playlist ?? "YouTube"),
+            tone: youtubeJob.status === "failed" ? "error" : "info",
+            dismissable: youtubeJob.status === "done" || youtubeJob.status === "failed"
+          }
+        : null;
+  const youtubeLineView = youtubeLine ? (
+    <p className={`youtube-import-line ${youtubeLine.tone}`} role="status">
+      <span>{youtubeLine.text}</span>
+      {youtubeLine.dismissable ? (
+        <button type="button" className="icon-button compact" aria-label="Dismiss" onClick={() => onYouTubeJob(null)}>
+          <X size={14} />
+        </button>
+      ) : null}
+    </p>
+  ) : null;
   const supportsPin = activeSource?.capabilities?.includes("pin") ?? false;
   // Spotify plays through Sonos's own Spotify link, so there's no stream for "This device".
   const sonosOnly = activeSource?.capabilities?.includes("sonos-only") ?? false;
@@ -1741,12 +1820,17 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
         </label>
       </div>
       {searchSlot ? createPortal(
+        <>
         <form
           className="main-search-form"
           role="search"
           aria-label="Search music"
           onSubmit={(event) => {
             event.preventDefault();
+            if (queryIsYouTube) {
+              void getFromYouTube();
+              return;
+            }
             if (!supportsSearch || !searchQuery.trim()) return;
             void runSearch();
             onSearch();
@@ -1765,18 +1849,22 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
               ref={searchInputRef}
               type="search"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={supportsSearch ? `Search ${activeSource?.name ?? "music"}` : `${activeSource?.name ?? "This source"} has no search`}
+              onChange={(event) => changeQuery(event.target.value)}
+              placeholder={supportsSearch
+                ? `Search ${activeSource?.name ?? "music"}${youtube?.available ? " or paste a YouTube link" : ""}`
+                : youtube?.available ? "Paste a YouTube link" : `${activeSource?.name ?? "This source"} has no search`}
               aria-label={`Search ${activeSource?.name ?? "music"}`}
               aria-keyshortcuts="/"
               enterKeyHint="search"
-              disabled={!supportsSearch}
+              disabled={!supportsSearch && !youtube?.available}
             />
           </span>
           {searchActive ? (
             <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
           ) : null}
-        </form>,
+        </form>
+        {youtubeLineView}
+        </>,
         searchSlot
       ) : null}
 
@@ -1785,14 +1873,18 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
         <div className="browse-search-label">
           <span>Search</span>
           <form
-            onSubmit={(event) => { event.preventDefault(); void runSearch(); }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (queryIsYouTube) void getFromYouTube();
+              else void runSearch();
+            }}
             style={{ display: "flex", gap: 6 }}
           >
             <input
               type="search"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={`Search ${activeSource?.name ?? ""}`}
+              onChange={(event) => changeQuery(event.target.value)}
+              placeholder={`Search ${activeSource?.name ?? ""}${youtube?.available ? " or paste a YouTube link" : ""}`}
               aria-label={`Search ${activeSource?.name ?? "music"}`}
               aria-keyshortcuts="/"
               enterKeyHint="search"
@@ -1801,6 +1893,7 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
               <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
             ) : null}
           </form>
+          {youtubeLineView}
           {supportsTypedSearch ? (
             <div className="browse-search-types" role="tablist">
               {([

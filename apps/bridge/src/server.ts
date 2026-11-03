@@ -12,6 +12,7 @@ import { subscribeMeter } from "./meter.js";
 import { serveArt } from "./artProxy.js";
 import { deleteSourceIcon, listSourceIcons, saveSourceIcon, serveSourceIcon } from "./sourceIcons.js";
 import { isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled, sourceClearConfig, sourceConfig, sourceSaveConfig, SourceRequestError } from "./sources.js";
+import { YouTubeImporter, YouTubeImportError } from "./youtubeImport.js";
 import path from "node:path";
 
 const SPOTIFY_ACCOUNT_PREF = "spotifySonosAccount";
@@ -107,6 +108,20 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     }
   });
   service.onEnqueue = (event) => queueReturn.onEnqueue(event.groupId, event);
+
+  // A pasted YouTube link: Downtify downloads it into Navidrome, and it plays from there.
+  const youtube = new YouTubeImporter({
+    endpoint: config.downtify,
+    playlist: config.youtubePlaylist,
+    pairingPath: path.join(path.dirname(config.dbPath), "downtify.json"),
+    search: async (query) => (await service.searchSource("navidrome", query)).items,
+    play: async (trackIds, groupId, mode) => {
+      const nowPlaying = await service.playSourceItems({ sourceId: "navidrome", trackIds, groupId, mode });
+      sendEvent({ type: "now-playing", payload: nowPlaying, at: new Date().toISOString() });
+      return nowPlaying;
+    },
+    onChange: (job) => sendEvent({ type: "youtube-import", payload: job, at: new Date().toISOString() })
+  });
 
   setInterval(async () => {
     if (clients.size === 0) return;
@@ -542,6 +557,27 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       const mode = body.mode ?? "replace";
       const nowPlaying = await service.playSourceItems({ sourceId, trackIds: body.trackIds, groupId: body.groupId, mode, autoplay: body.autoplay });
       return json(response, nowPlaying);
+    }
+
+    if (url.pathname.startsWith("/api/youtube/")) {
+      try {
+        if (request.method === "GET" && url.pathname === "/api/youtube/status") return json(response, await youtube.status());
+        if (request.method === "GET" && url.pathname === "/api/youtube/imports") return json(response, youtube.recent());
+        if (request.method === "POST" && url.pathname === "/api/youtube/pair") {
+          const body = await readJson<{ code?: string }>(request);
+          if (!body.code?.trim()) return json(response, { error: "Missing code" }, 400);
+          return json(response, await youtube.pair(body.code));
+        }
+        if (request.method === "POST" && url.pathname === "/api/youtube/unpair") return json(response, await youtube.unpair());
+        if (request.method === "POST" && url.pathname === "/api/youtube/import") {
+          const body = await readJson<{ url?: string; groupId?: string; mode?: PlaybackMode }>(request);
+          if (!body.url?.trim()) return json(response, { error: "Missing url" }, 400);
+          return json(response, await youtube.start({ url: body.url.trim(), groupId: body.groupId || undefined, mode: body.mode }), 202);
+        }
+      } catch (error) {
+        if (error instanceof YouTubeImportError) return json(response, { error: error.message }, error.status);
+        throw error;
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/api/music/services") {
