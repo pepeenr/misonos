@@ -277,6 +277,42 @@ describe("App", () => {
     await waitFor(() => expect(sets).toEqual(expect.arrayContaining([{ zone: "z1", volume: 9 }, { zone: "z2", volume: 9 }])));
     await waitFor(() => expect(evenOut).toBeDisabled());
   });
+
+  it("plays the queue from a row's play button, and pauses the row that's playing", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    let nowPlaying = { groupId: "g1", state: "PLAYING", title: "One", playlistPosition: 1, updatedAt: new Date().toISOString() };
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
+      if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
+      if (url.endsWith("/api/sources")) return json([]);
+      if (url.endsWith("/queue/play-index") || url.endsWith("/transport")) {
+        const body = JSON.parse(String(init?.body)) as { index?: number; action?: string };
+        calls.push({ path: url.slice(url.lastIndexOf("/") + 1), body });
+        nowPlaying = body.index
+          ? { ...nowPlaying, state: "PLAYING", title: "Three", playlistPosition: body.index }
+          : { ...nowPlaying, state: body.action === "pause" ? "PAUSED_PLAYBACK" : "PLAYING" };
+        return json(nowPlaying);
+      }
+      if (url.endsWith("/now-playing")) return json(nowPlaying);
+      if (url.endsWith("/queue")) return json([{ id: "q1", title: "One" }, { id: "q2", title: "Two" }, { id: "q3", title: "Three" }]);
+      return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    // The row that's playing pauses instead of starting over; the others play from there.
+    fireEvent.click(await screen.findByRole("button", { name: "Pause One" }));
+    await waitFor(() => expect(calls).toEqual([{ path: "transport", body: { action: "pause" } }]));
+    fireEvent.click(await screen.findByRole("button", { name: "Resume One" }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1]).toEqual({ path: "transport", body: { action: "play" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Play from Three" }));
+    // Sonos counts queue tracks from 1.
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls[2]).toEqual({ path: "play-index", body: { index: 3 } });
+    expect(await screen.findByRole("button", { name: "Pause Three" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play from One" })).toBeInTheDocument();
+  });
 });
 
 function json(value: unknown): Response {

@@ -470,11 +470,28 @@ export class SonosService {
   async playQueueIndex(groupId: string, index: number): Promise<NowPlaying> {
     const group = await this.requireGroup(groupId);
     const coordinator = await this.requireZone(group.coordinatorId);
-    await callSoap(coordinator.ipAddress, "AVTransport", "Seek", {
+    const seekTrack = () => callSoap(coordinator.ipAddress, "AVTransport", "Seek", {
       InstanceID: 0,
       Unit: "TRACK_NR",
       Target: index
     });
+    try {
+      await seekTrack();
+    } catch (error) {
+      // A track-number seek only works while the transport plays the queue. When it's
+      // on something else (a radio station, line-in, a single stream), point it back
+      // at the queue and seek again, so playing a queue row continues through the
+      // rest of the queue. Already on the queue means the seek itself was bad.
+      if (!(error instanceof SonosSoapError)) throw error;
+      const media = await callSoap(coordinator.ipAddress, "AVTransport", "GetMediaInfo", { InstanceID: 0 });
+      if (programOfUri(media.CurrentURI ?? "") === "queue") throw error;
+      await callSoap(coordinator.ipAddress, "AVTransport", "SetAVTransportURI", {
+        InstanceID: 0,
+        CurrentURI: `x-rincon-queue:${coordinator.uuid}#0`,
+        CurrentURIMetaData: ""
+      });
+      await seekTrack();
+    }
     await callSoap(coordinator.ipAddress, "AVTransport", "Play", { InstanceID: 0, Speed: 1 });
     return this.nowPlayingSettled(groupId);
   }

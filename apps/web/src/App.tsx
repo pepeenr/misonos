@@ -628,7 +628,11 @@ export function App() {
 
   const playQueueItem = async (index: number) => {
     if (!selectedGroup) return;
-    setNowPlaying(await bridgeApi.playQueueIndex(selectedGroup.id, index));
+    try {
+      setNowPlaying(await bridgeApi.playQueueIndex(selectedGroup.id, index));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not play from that track");
+    }
     void loadNowPlaying(selectedGroup.id);
   };
 
@@ -1276,6 +1280,7 @@ export function App() {
               activeIndex={effectiveActiveIndex}
               isPlaying={effectivePlaying}
               onPlay={(index) => onQueuePlay(index)}
+              onTogglePlay={onPlayPause}
               onRemove={(index) => onQueueRemove(index)}
               onReorder={onQueueReorder}
               dragReorder={queueDragReorder}
@@ -3349,7 +3354,10 @@ interface QueueListProps {
   queue: QueueItem[];
   activeIndex: number;
   isPlaying: boolean;
+  /** Plays the queue from this row on: the track, then the ones after it. */
   onPlay: (index: number) => void;
+  /** Pauses or resumes the row that's playing now, without restarting it. */
+  onTogglePlay: () => void;
   onRemove: (index: number) => void;
   onReorder: (from: number, to: number) => void;
   dragReorder: boolean;
@@ -3357,7 +3365,7 @@ interface QueueListProps {
   onFavorite: (item: QueueItem) => void;
 }
 
-function QueueList({ queue, activeIndex, isPlaying, onPlay, onRemove, onReorder, dragReorder, isFavorite, onFavorite }: QueueListProps) {
+function QueueList({ queue, activeIndex, isPlaying, onPlay, onTogglePlay, onRemove, onReorder, dragReorder, isFavorite, onFavorite }: QueueListProps) {
   const listRef = useRef<HTMLOListElement | null>(null);
   const activeItemRef = useRef<HTMLLIElement | null>(null);
 
@@ -3495,6 +3503,27 @@ function QueueList({ queue, activeIndex, isPlaying, onPlay, onRemove, onReorder,
                 <small>{[item.artist, item.album].filter(Boolean).join(" - ")}</small>
               </span>
             </button>
+            {isActive ? (
+              <button
+                type="button"
+                className="queue-action queue-play on"
+                title={isPlaying ? "Pause" : "Resume"}
+                aria-label={isPlaying ? `Pause ${item.title}` : `Resume ${item.title}`}
+                onClick={onTogglePlay}
+              >
+                {isPlaying ? <Pause size={15} /> : <Play size={15} />}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="queue-action queue-play"
+                title="Play from here"
+                aria-label={`Play from ${item.title}`}
+                onClick={() => onPlay(index)}
+              >
+                <Play size={15} />
+              </button>
+            )}
             {item.sourceId && item.trackId ? (
               <button
                 type="button"
