@@ -2223,6 +2223,22 @@ h2 {
   white-space: nowrap;
 }
 
+/* A phone row holds the reorder control and three buttons (play, favorite, remove)
+   besides the track. Drop the track-number column (the playing row stays marked by
+   its colors) and slim the rest so the title still has room. */
+@media (max-width: 640px) {
+  .queue-item { gap: 4px; }
+  .queue-item-main {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+  .queue-indicator { display: none; }
+  .queue-item .browse-thumb { width: 36px; height: 36px; }
+  .queue-action, .queue-remove { width: 34px; }
+  .queue-reorder button { width: 28px; }
+}
+
 .queue-item.active .queue-item-main {
   border-color: rgba(145, 211, 196, 0.7);
   background: rgba(145, 211, 196, 0.12);
