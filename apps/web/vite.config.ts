@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg", "apple-touch-icon.png"],
+      includeAssets: ["favicon.png", "apple-touch-icon.png"],
       // Installable in the dev server too, so add-to-home-screen works over Tailscale
       // without a separate build step.
       devOptions: { enabled: true, type: "module" },
