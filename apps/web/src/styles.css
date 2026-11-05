@@ -2388,13 +2388,13 @@ small {
   place-items: center;
   width: 100%;
   height: 100%;
-  color: #141716;
-  background: linear-gradient(135deg, #91d3c4, #f1b555);
+  background: #01482e;
 }
 
-.artwork-fallback svg {
-  width: 62%;
-  height: 62%;
+.artwork-fallback img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .track-copy {

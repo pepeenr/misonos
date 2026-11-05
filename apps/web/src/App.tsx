@@ -1024,14 +1024,8 @@ export function App() {
               onClick={() => { setArtworkMetaOpen(true); setArtworkFullscreen(true); }}
             >
               {effectiveNowPlaying?.albumArtUri ? <img src={artSrc(effectiveNowPlaying.albumArtUri)} alt="" /> : (
-                <div className="artwork-fallback" aria-label="MiSonos">
-                  <svg viewBox="0 0 512 512" role="img" aria-hidden="true">
-                    <g fill="currentColor">
-                      <rect x="170" y="176" width="44" height="160" rx="22" />
-                      <rect x="234" y="136" width="44" height="240" rx="22" />
-                      <rect x="298" y="200" width="44" height="112" rx="22" />
-                    </g>
-                  </svg>
+                <div className="artwork-fallback">
+                  <img src="/pwa-512x512.png" alt="MiSonos" draggable={false} />
                 </div>
               )}
             </button>
