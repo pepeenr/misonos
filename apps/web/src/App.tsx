@@ -2519,17 +2519,19 @@ interface EqSliderProps {
   disabled?: boolean;
   onInput: (value: number) => void;
   onCommit: (value: number) => void;
+  min?: number;
+  max?: number;
 }
 
-function EqSlider({ label, value, disabled, onInput, onCommit }: EqSliderProps) {
+function EqSlider({ label, value, disabled, onInput, onCommit, min = -10, max = 10 }: EqSliderProps) {
   return (
     <div className="eq-slider">
       <span className="eq-slider-label">{label}</span>
       <input
         aria-label={label}
         type="range"
-        min="-10"
-        max="10"
+        min={min}
+        max={max}
         step="1"
         value={value}
         disabled={disabled}
@@ -2649,6 +2651,11 @@ function Equalizer({ zones }: EqualizerProps) {
               <EqSlider label="Treble" value={eq.treble} disabled={busy}
                 onInput={(value) => setEq({ ...eq, treble: value })}
                 onCommit={(value) => void commit({ treble: value })} />
+              {eq.subGain !== undefined ? (
+                <EqSlider label="Sub level" value={eq.subGain} min={-15} max={15} disabled={busy}
+                  onInput={(value) => setEq({ ...eq, subGain: value })}
+                  onCommit={(value) => void commit({ subGain: value })} />
+              ) : null}
               <label className="pref-row">
                 <span className="pref-label">
                   <strong>Loudness</strong>

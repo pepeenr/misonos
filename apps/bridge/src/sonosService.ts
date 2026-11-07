@@ -549,16 +549,19 @@ export class SonosService {
     const zone = await this.requireZone(zoneId);
     return this.guardSoap(zone.uuid, async () => {
       // Bass/Treble are master-only (no Channel arg); Loudness is per-channel.
-      const [bass, treble, loudness] = await Promise.all([
+      const [bass, treble, loudness, subGain] = await Promise.all([
         callSoap(zone.ipAddress, "RenderingControl", "GetBass", { InstanceID: 0 }),
         callSoap(zone.ipAddress, "RenderingControl", "GetTreble", { InstanceID: 0 }),
-        callSoap(zone.ipAddress, "RenderingControl", "GetLoudness", { InstanceID: 0, Channel: "Master" })
+        callSoap(zone.ipAddress, "RenderingControl", "GetLoudness", { InstanceID: 0, Channel: "Master" }),
+        // Every player answers for a Sub, so only ask where the room really has one.
+        zone.hasSub ? callSoap(zone.ipAddress, "RenderingControl", "GetEQ", { InstanceID: 0, EQType: "SubGain" }) : undefined
       ]);
       return {
         id: zone.id,
         bass: clampEq(Number.parseInt(bass.CurrentBass ?? "0", 10)),
         treble: clampEq(Number.parseInt(treble.CurrentTreble ?? "0", 10)),
-        loudness: loudness.CurrentLoudness === "1"
+        loudness: loudness.CurrentLoudness === "1",
+        ...(subGain ? { subGain: clampSubGain(Number.parseInt(subGain.CurrentValue ?? "0", 10)) } : {})
       };
     });
   }
@@ -576,6 +579,14 @@ export class SonosService {
         InstanceID: 0,
         Channel: "Master",
         DesiredLoudness: payload.loudness ? 1 : 0
+      });
+    }
+    if (payload.subGain !== undefined) {
+      if (!zone.hasSub) throw new Error(`${zone.name} has no Sub`);
+      await callSoap(zone.ipAddress, "RenderingControl", "SetEQ", {
+        InstanceID: 0,
+        EQType: "SubGain",
+        DesiredValue: clampSubGain(payload.subGain)
       });
     }
     return this.zoneEq(zoneId);
@@ -1503,6 +1514,11 @@ function numericPosition(value: string | undefined): number | undefined {
 function clampVolume(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function clampSubGain(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(-15, Math.min(15, Math.round(value)));
 }
 
 function clampEq(value: number): number {

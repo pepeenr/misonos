@@ -20,6 +20,9 @@ export interface SonosZone {
   // For a hidden member of a bonded room (the second half of a stereo pair, a Sub,
   // home theater surrounds): the uuid of the visible member that stands for the room.
   bondedTo?: string;
+  // On the visible member of a room that has a Sub bonded to it (a stereo pair or a
+  // home theater with one): the room's Sub level lives on this player.
+  hasSub?: boolean;
   // Sonos software generation: 1 = S1, 2 = S2. Parsed from the SWGen attribute
   // in ZoneGroupState (present on real players). Undefined until discovered.
   // Drives playback URI choice for SMAPI sources: S2 honors DIDL on plain-http
@@ -420,12 +423,15 @@ export interface EqState {
   bass: number; // -10..10
   treble: number; // -10..10
   loudness: boolean;
+  // The Sub's level, -15..15. Only for a room with a Sub bonded to it.
+  subGain?: number;
 }
 
 export interface EqPayload {
   bass?: number;
   treble?: number;
   loudness?: boolean;
+  subGain?: number;
 }
 
 // The tone values a preset applies. Built-in presets carry no DB id/createdAt.
