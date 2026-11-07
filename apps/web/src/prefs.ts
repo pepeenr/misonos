@@ -50,6 +50,22 @@ export const PLAYLISTS_SOURCE_PREF = stringPref("playlistsSourceId", "misonos:pl
 // that a desktop keeps open.
 export const QUEUE_COLLAPSED_PREF = boolPref("queueCollapsed", "misonos:queueCollapsed");
 export const PLAYLISTS_COLLAPSED_PREF = boolPref("playlistsCollapsed", "misonos:playlistsCollapsed");
+// Collapsed Settings sections: section id → true. Per device, like the cards above; a
+// section that isn't listed is open.
+export const SETTINGS_COLLAPSED_PREF: PrefDef<Record<string, boolean>> = {
+  bridgeKey: "settingsCollapsed",
+  localKey: "misonos:settingsCollapsed",
+  decode: (raw) => {
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+      return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => entry[1] === true));
+    } catch {
+      return null;
+    }
+  },
+  encode: (value) => JSON.stringify(value)
+};
 // Colors picked for groups (Group Editor → a group's settings): coordinator id →
 // palette color name. Shared, so every device shows a group in the same color.
 export const GROUP_COLORS_PREF: PrefDef<Record<string, string>> = {

@@ -1,3 +1,4 @@
+import { SettingsCard } from "./SettingsSection.js";
 import { useCallback, useEffect, useState } from "react";
 import type { SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus } from "@misonos/sonos-protocol";
 import { bridgeApi } from "./api.js";
@@ -142,8 +143,7 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
   const pinnedByEnv = selected?.origin === "env";
 
   return (
-    <section className="settings-card">
-      <h3>Spotify</h3>
+    <SettingsCard id="spotify" title="Spotify">
       <p className="settings-card-help">
         Browse and search your Spotify library here. Sonos plays it with a Spotify account linked in the Sonos app,
         so it plays on speakers only, not on this device.
@@ -291,6 +291,6 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
           )}
         </>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

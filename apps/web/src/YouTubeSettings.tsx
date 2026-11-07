@@ -1,3 +1,4 @@
+import { SettingsCard } from "./SettingsSection.js";
 import { useEffect, useState } from "react";
 import type { YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { bridgeApi } from "./api.js";
@@ -32,8 +33,7 @@ export function YouTubeSettings({ onChanged }: { onChanged: () => void }) {
   if (!status?.available) return null;
 
   return (
-    <section className="settings-card" aria-label="YouTube links">
-      <h3>YouTube links</h3>
+    <SettingsCard id="youtube-links" title="YouTube links" label="YouTube links">
       <p className="settings-card-help">
         Paste a YouTube video or playlist link into the search box and press Enter. Downtify downloads the songs into
         Navidrome and adds them to the “{status.playlist}” playlist, and MiSonos plays them on the room you picked.
@@ -84,6 +84,6 @@ export function YouTubeSettings({ onChanged }: { onChanged: () => void }) {
           </form>
         </>
       )}
-    </section>
+    </SettingsCard>
   );
 }

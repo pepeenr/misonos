@@ -1,3 +1,4 @@
+import { SettingsSection } from "./SettingsSection.js";
 import { useState } from "react";
 import { ArrowRightCircle, MapPin, Plus, Trash2 } from "lucide-react";
 import { isCurrent, loadServers, normalizeUrl, saveServers, switchToServer, type MisonosServer } from "./servers.js";
@@ -34,8 +35,7 @@ export function Locations() {
   };
 
   return (
-    <section className="queue-panel" aria-label="MiSonos locations">
-      <div className="section-heading"><h2>Locations</h2></div>
+    <SettingsSection id="locations" title="Locations" label="MiSonos locations">
       <p className="settings-hint">
         Point the app at a MiSonos server on another network — a different house, say.
       </p>
@@ -86,6 +86,6 @@ export function Locations() {
         <button type="button" disabled={!url.trim()} onClick={add}><Plus size={14} /> Add</button>
       </div>
       {error ? <div className="service-result error">{error}</div> : null}
-    </section>
+    </SettingsSection>
   );
 }
