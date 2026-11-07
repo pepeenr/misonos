@@ -313,6 +313,52 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: "Pause Three" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play from One" })).toBeInTheDocument();
   });
+
+  it("shows a Sub level slider for a room that has a Sub, and sets it", async () => {
+    const zones = [
+      { id: "z1", uuid: "z1", name: "Living Room", ipAddress: "10.0.0.2", location: "", visible: true, hasSub: true },
+      { id: "z2", uuid: "z2", name: "Office", ipAddress: "10.0.0.3", location: "", visible: true }
+    ];
+    const group = { id: "g1", coordinatorId: "z1", coordinatorName: "Living Room", zones };
+    const sets: unknown[] = [];
+    let subGain = -2;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/groups")) return json([group]);
+      if (url.endsWith("/api/zones")) return json(zones);
+      if (url.endsWith("/api/sources")) return json([]);
+      const eq = url.match(/\/api\/zones\/(z\d)\/eq$/);
+      if (eq) {
+        if (init?.method === "POST") {
+          const body = JSON.parse(String(init.body)) as { subGain?: number };
+          sets.push(body);
+          if (body.subGain !== undefined) subGain = body.subGain;
+        }
+        return json({ id: eq[1], bass: 0, treble: 0, loudness: false, ...(eq[1] === "z1" ? { subGain } : {}) });
+      }
+      if (url.endsWith("/api/eq-presets")) return json([]);
+      if (url.endsWith("/api/alarms")) return json([]);
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      if (url.endsWith("/api/discover")) return json({ groups: [group], zones });
+      // The rest of Settings (sources, services, alarms) isn't under test: let it fail quietly.
+      return new Response("{}", { status: 404 });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    fireEvent.click(await screen.findByLabelText("Settings"));
+    const sub = await screen.findByRole("slider", { name: "Sub level" });
+    expect(sub).toHaveValue("-2");
+    expect(sub).toHaveAttribute("min", "-15");
+    expect(sub).toHaveAttribute("max", "15");
+    fireEvent.change(sub, { target: { value: "4" } });
+    fireEvent.pointerUp(sub);
+    await waitFor(() => expect(sets).toEqual([{ subGain: 4 }]));
+
+    // A room without a Sub has just bass and treble.
+    fireEvent.change(screen.getByLabelText("Speaker"), { target: { value: "z2" } });
+    await waitFor(() => expect(screen.queryByRole("slider", { name: "Sub level" })).toBeNull());
+    expect(screen.getByRole("slider", { name: "Bass" })).toBeInTheDocument();
+  });
 });
 
 function json(value: unknown): Response {

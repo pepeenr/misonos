@@ -54,6 +54,7 @@ export function parseZoneGroupState(xml: string): { zones: SonosZone[]; groups: 
         visible: attrText(memberTag, "Invisible") !== "1",
         swGen: parseGen(attrText(memberTag, "SWGen"))
       };
+      if (zone.visible && hasSubwoofer(memberTag)) zone.hasSub = true;
       zones.set(uuid, zone);
       groupZones.push(zone);
     }
@@ -109,4 +110,10 @@ function satelliteParents(groupBlock: string): Map<string, string> {
 function channelMapMembers(memberTag: string): string[] {
   const maps = [attrText(memberTag, "ChannelMapSet"), attrText(memberTag, "HTSatChanMapSet")].filter(Boolean).join(";");
   return maps.split(";").map((entry) => entry.split(":")[0]).filter(Boolean);
+}
+
+// Whether the member's channel map has a Sub (channel "SW") in it.
+function hasSubwoofer(memberTag: string): boolean {
+  const maps = [attrText(memberTag, "ChannelMapSet"), attrText(memberTag, "HTSatChanMapSet")].filter(Boolean).join(";");
+  return maps.split(";").some((entry) => (entry.split(":")[1] ?? "").split(",").some((channel) => channel.trim() === "SW"));
 }
