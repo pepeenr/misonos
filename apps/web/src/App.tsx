@@ -24,6 +24,7 @@ import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
 import { forgetPlaylists, pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
+import { SettingsCard, SettingsSection } from "./SettingsSection.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
@@ -2327,15 +2328,16 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
   const optionalPresets = enabledPresets.filter((preset) => !preset.registrationRequired);
 
   return (
-    <section className="queue-panel" aria-label="Custom music services">
-      <div className="section-heading">
-        <h2>Custom Music Services</h2>
-        <div className="heading-actions">
-          <button className="icon-button compact" type="button" onClick={() => void load()} title="Refresh">
-            <RefreshCw size={16} />
-          </button>
-        </div>
-      </div>
+    <SettingsSection
+      id="custom-music-services"
+      title="Custom Music Services"
+      label="Custom music services"
+      actions={(
+        <button className="icon-button compact" type="button" onClick={() => void load()} title="Refresh">
+          <RefreshCw size={16} />
+        </button>
+      )}
+    >
       {loading && !presets ? (
         <div className="empty-panel">Loading...</div>
       ) : error ? (
@@ -2398,7 +2400,7 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
           ) : null}
         </div>
       ) : null}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -2625,8 +2627,7 @@ function Equalizer({ zones }: EqualizerProps) {
   }, [loadPresets]);
 
   return (
-    <section className="queue-panel" aria-label="Equalizer">
-      <div className="section-heading"><h2>Equalizer</h2></div>
+    <SettingsSection id="equalizer" title="Equalizer">
       {zones.length === 0 ? (
         <div className="empty-panel">No speakers found.</div>
       ) : (
@@ -2700,7 +2701,7 @@ function Equalizer({ zones }: EqualizerProps) {
           )}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -2749,10 +2750,7 @@ function SourceLogoSettings({ customIcons, sourcesVersion, onChanged }: SourceLo
   }, [onChanged]);
 
   return (
-    <section className="queue-panel" aria-label="Service logos">
-      <div className="section-heading">
-        <h2>Service logos</h2>
-      </div>
+    <SettingsSection id="service-logos" title="Service logos">
       <p className="pref-hint">Upload your own logo for a music service. SVG, PNG, JPEG, WebP, or GIF up to 2 MB.</p>
       {error ? <div className="empty-panel error-panel"><span>{error}</span></div> : null}
       <ul className="logo-list">
@@ -2796,7 +2794,7 @@ function SourceLogoSettings({ customIcons, sourcesVersion, onChanged }: SourceLo
           );
         })}
       </ul>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -2822,10 +2820,7 @@ function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChrom
   // Keep a picked source listed while it's away (signed out, switched off).
   const playlistsSourceMissing = playlistsSource !== "off" && !!playlistSources && !playlistSources.some((entry) => entry.source.id === playlistsSource);
   return (
-    <section className="queue-panel" aria-label="Preferences">
-      <div className="section-heading">
-        <h2>Preferences</h2>
-      </div>
+    <SettingsSection id="preferences" title="Preferences">
       <label className="pref-row">
         <span className="pref-label">
           <strong>Maximum volume</strong>
@@ -2905,7 +2900,7 @@ function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChrom
         </span>
         <button type="button" className="pref-button" onClick={onShowShortcuts}>Show</button>
       </div>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -2929,15 +2924,16 @@ function AboutSystem() {
   useEffect(() => { void load(); }, [load]);
 
   return (
-    <section className="queue-panel" aria-label="About my Sonos system">
-      <div className="section-heading">
-        <h2>About My Sonos System</h2>
-        <div className="heading-actions">
-          <button className="icon-button compact" type="button" onClick={() => void load()} title="Refresh">
-            <RefreshCw size={16} />
-          </button>
-        </div>
-      </div>
+    <SettingsSection
+      id="about-system"
+      title="About My Sonos System"
+      label="About my Sonos system"
+      actions={(
+        <button className="icon-button compact" type="button" onClick={() => void load()} title="Refresh">
+          <RefreshCw size={16} />
+        </button>
+      )}
+    >
       {state === "loading" && !devices ? (
         <div className="empty-panel">Loading...</div>
       ) : state === "error" ? (
@@ -2971,7 +2967,7 @@ function AboutSystem() {
       ) : (
         <div className="empty-panel">No reachable speakers.</div>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -3054,8 +3050,7 @@ function YouTubeMusicAuth() {
   }, [refresh]);
 
   return (
-    <section className="settings-card">
-      <h3>YouTube Music</h3>
+    <SettingsCard id="youtube-music" title="YouTube Music">
       <p className="settings-card-help">Anonymous search and browse work out of the box. Connect your Library &amp; My Supermix by pasting your YouTube&nbsp;Music cookies below.</p>
       {error ? <p className="settings-card-error">{error}</p> : null}
       <h4 className="settings-card-subhead">Library &amp; Supermix (cookies)</h4>
@@ -3091,7 +3086,7 @@ function YouTubeMusicAuth() {
           <button type="button" disabled={busy} onClick={() => setShowPaste(true)}>Paste cookies</button>
         </div>
       )}
-    </section>
+    </SettingsCard>
   );
 }
 
@@ -3137,15 +3132,16 @@ function MusicServicesDebug() {
   }, [accounts, ytmServiceId]);
 
   return (
-    <section className="queue-panel" aria-label="Music services">
-      <div className="section-heading">
-        <h2>Music Services (debug)</h2>
-        <div className="heading-actions">
-          <button className="icon-button compact" type="button" onClick={() => void loadServices()} title="Discover services">
-            <RefreshCw size={16} />
-          </button>
-        </div>
-      </div>
+    <SettingsSection
+      id="music-services-debug"
+      title="Music Services (debug)"
+      label="Music services"
+      actions={(
+        <button className="icon-button compact" type="button" onClick={() => void loadServices()} title="Discover services">
+          <RefreshCw size={16} />
+        </button>
+      )}
+    >
       {servicesState === "idle" ? (
         <div className="empty-panel">Tap refresh to discover services.</div>
       ) : servicesState === "loading" ? (
@@ -3206,7 +3202,7 @@ function MusicServicesDebug() {
           </details>
         </div>
       ) : null}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -3242,10 +3238,7 @@ function BrowseDebug() {
   }, [objectId, criteria]);
 
   return (
-    <section className="queue-panel" aria-label="ContentDirectory browse/search">
-      <div className="section-heading">
-        <h2>ContentDirectory Browse / Search</h2>
-      </div>
+    <SettingsSection id="browse-debug" title="ContentDirectory Browse / Search" label="ContentDirectory browse/search">
       <div style={{ display: "grid", gap: 8, padding: "0 0 12px" }}>
         <label style={{ display: "grid", gap: 4 }}>
           <span style={{ fontSize: "0.78rem", color: "#aeb4ad" }}>ObjectID / ContainerID</span>
@@ -3304,7 +3297,7 @@ function BrowseDebug() {
           ))}
         </ol>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 

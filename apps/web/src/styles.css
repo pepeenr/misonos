@@ -566,6 +566,17 @@ h2 {
   font-size: 1rem;
 }
 
+/* The card's content sits in its own box so a fold can hide it; it lays out the way the
+   card's own children did. */
+.settings-card-body {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-card-body[hidden] {
+  display: none;
+}
+
 .settings-card-help {
   margin: 0;
   font-size: 0.82rem;

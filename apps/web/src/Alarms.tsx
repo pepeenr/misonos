@@ -1,3 +1,4 @@
+import { SettingsSection } from "./SettingsSection.js";
 import { useCallback, useEffect, useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import type { Alarm, AlarmInput, AlarmProgram, AlarmRecurrence, SonosZone } from "@misonos/sonos-protocol";
@@ -55,15 +56,15 @@ export function Alarms({ zones }: AlarmsProps) {
   };
 
   return (
-    <section className="queue-panel" aria-label="Alarms">
-      <div className="section-heading">
-        <h2>Alarms</h2>
-        {editing === null ? (
-          <button className="icon-button compact" type="button" title="Add alarm" aria-label="Add alarm" disabled={busy || zones.length === 0} onClick={() => setEditing("new")}>
-            <Plus size={16} />
-          </button>
-        ) : null}
-      </div>
+    <SettingsSection
+      id="alarms"
+      title="Alarms"
+      actions={editing === null ? (
+        <button className="icon-button compact" type="button" title="Add alarm" aria-label="Add alarm" disabled={busy || zones.length === 0} onClick={() => setEditing("new")}>
+          <Plus size={16} />
+        </button>
+      ) : null}
+    >
 
       {error ? <div className="empty-panel error-panel"><span>{error}</span></div> : null}
 
@@ -109,7 +110,7 @@ export function Alarms({ zones }: AlarmsProps) {
           </div>
         </div>
       ) : null}
-    </section>
+    </SettingsSection>
   );
 }
 
