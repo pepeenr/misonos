@@ -50,6 +50,7 @@ export const PLAYLISTS_SOURCE_PREF = stringPref("playlistsSourceId", "misonos:pl
 // that a desktop keeps open.
 export const QUEUE_COLLAPSED_PREF = boolPref("queueCollapsed", "misonos:queueCollapsed");
 export const PLAYLISTS_COLLAPSED_PREF = boolPref("playlistsCollapsed", "misonos:playlistsCollapsed");
+export const HISTORY_COLLAPSED_PREF = boolPref("historyCollapsed", "misonos:historyCollapsed");
 // Collapsed Settings sections: section id → true. Per device, like the cards above; a
 // section that isn't listed is open.
 export const SETTINGS_COLLAPSED_PREF: PrefDef<Record<string, boolean>> = {

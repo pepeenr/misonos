@@ -1,4 +1,4 @@
-import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus, TransportAction, VolumePayload, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
+import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, PlayHistoryEntry, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus, TransportAction, VolumePayload, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { noteBridgeFailure } from "./accessSession.js";
 import { apiUrl } from "./servers.js";
 
@@ -223,6 +223,17 @@ export const bridgeApi = {
     request<void>("/api/recently-played/remove", { method: "POST", body: JSON.stringify({ sourceId, trackId }) }),
   clearRecentlyPlayed: () =>
     request<void>("/api/recently-played/clear", { method: "POST", body: "{}" }),
+  playHistory: (limit?: number, beforeId?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.set("limit", String(limit));
+    if (beforeId !== undefined) params.set("before", String(beforeId));
+    const query = params.toString();
+    return request<PlayHistoryEntry[]>(`/api/history${query ? `?${query}` : ""}`);
+  },
+  deletePlayHistory: (id: number) =>
+    request<void>(`/api/history/${id}/delete`, { method: "POST", body: "{}" }),
+  clearPlayHistory: () =>
+    request<void>("/api/history/clear", { method: "POST", body: "{}" }),
   eqPresets: () => request<EqPreset[]>("/api/eq-presets"),
   createEqPreset: (input: Omit<EqPreset, "id" | "createdAt">) =>
     request<EqPreset>("/api/eq-presets", { method: "POST", body: JSON.stringify(input) }),
@@ -288,6 +299,7 @@ export function subscribeBridgeEvents(onEvent: (event: BridgeEvent) => void, onE
   source.addEventListener("now-playing", handler as EventListener);
   source.addEventListener("volume", handler as EventListener);
   source.addEventListener("youtube-import", handler as EventListener);
+  source.addEventListener("history", handler as EventListener);
   source.addEventListener("error", handler as EventListener);
   source.onerror = () => {
     noteBridgeFailure();

@@ -108,6 +108,23 @@ export interface RecentlyPlayedTable {
   played_at: string; // ISO-8601
 }
 
+// Every song (or station) as it started in a room, from any app, newest first. Unlike
+// recently_played it isn't deduped: a song that comes back later is a new row. Capped.
+// Powers the main screen's History card.
+export interface PlayHistoryTable {
+  id: Generated<number>;
+  played_at: string; // ISO-8601
+  group_id: string;
+  rooms: string; // "Living Room + Office"
+  title: string;
+  artist: string | null;
+  album: string | null;
+  image: string | null;
+  source_id: string | null; // set when it came from a MiSonos source
+  track_id: string | null;
+  is_live: number; // 0/1
+}
+
 export interface Database {
   preference: PreferenceTable;
   recently_viewed: RecentlyViewedTable;
@@ -118,4 +135,5 @@ export interface Database {
   recent_queue: RecentQueueTable;
   recent_queue_item: RecentQueueItemTable;
   recently_played: RecentlyPlayedTable;
+  play_history: PlayHistoryTable;
 }

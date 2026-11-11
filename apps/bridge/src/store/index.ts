@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import SqliteDatabase from "better-sqlite3";
 import { Kysely, SqliteDialect } from "kysely";
 import { Migrator } from "kysely/migration";
-import type { EqPreset, Favorite, Playlist, PlaylistItem, Preference, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, SourceItemKind } from "@misonos/sonos-protocol";
+import type { EqPreset, Favorite, Playlist, PlaylistItem, PlayHistoryEntry, Preference, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, SourceItemKind } from "@misonos/sonos-protocol";
 import { migrationProvider } from "./migrations.js";
 import type { Database } from "./schema.js";
 
@@ -12,6 +12,8 @@ const DEFAULT_RECENTLY_VIEWED_LIMIT = 50;
 const RECENTLY_PLAYED_CAP = 30;
 const DEFAULT_RECENTLY_PLAYED_LIMIT = 30;
 const RECENT_QUEUE_CAP = 3; // distinct recent queues kept per coordinator
+const PLAY_HISTORY_CAP = 2000; // a few weeks of everyday listening
+const DEFAULT_PLAY_HISTORY_LIMIT = 50;
 
 /** A flat track row destined for a playlist (albums are expanded into these upstream). */
 export interface PlaylistItemInput {
@@ -46,6 +48,11 @@ export interface Store {
   recordRecentlyPlayed(input: Omit<RecentlyPlayedItem, "playedAt">): Promise<void>;
   deleteRecentlyPlayed(sourceId: string, trackId: string): Promise<void>;
   clearRecentlyPlayed(): Promise<void>;
+  // Play history: every song as it started, newest first. `beforeId` pages back.
+  listPlayHistory(limit?: number, beforeId?: number): Promise<PlayHistoryEntry[]>;
+  addPlayHistory(input: Omit<PlayHistoryEntry, "id">): Promise<PlayHistoryEntry>;
+  deletePlayHistory(id: number): Promise<void>;
+  clearPlayHistory(): Promise<void>;
   listEqPresets(): Promise<EqPreset[]>;
   createEqPreset(input: Omit<EqPreset, "id" | "createdAt">): Promise<EqPreset>;
   deleteEqPreset(id: number): Promise<void>;
@@ -214,6 +221,47 @@ export async function createStore(dbPath: string): Promise<Store> {
 
     async clearRecentlyPlayed(): Promise<void> {
       await db.deleteFrom("recently_played").execute();
+    },
+
+    async listPlayHistory(limit: number = DEFAULT_PLAY_HISTORY_LIMIT, beforeId?: number): Promise<PlayHistoryEntry[]> {
+      let query = db.selectFrom("play_history").selectAll().orderBy("id", "desc").limit(Math.max(1, Math.min(limit, 500)));
+      if (beforeId !== undefined) query = query.where("id", "<", beforeId);
+      return (await query.execute()).map(toPlayHistory);
+    },
+
+    async addPlayHistory(input: Omit<PlayHistoryEntry, "id">): Promise<PlayHistoryEntry> {
+      return db.transaction().execute(async (tx) => {
+        const row = await tx
+          .insertInto("play_history")
+          .values({
+            played_at: input.playedAt,
+            group_id: input.groupId,
+            rooms: input.rooms,
+            title: input.title,
+            artist: input.artist ?? null,
+            album: input.album ?? null,
+            image: input.albumArtUri ?? null,
+            source_id: input.sourceId ?? null,
+            track_id: input.trackId ?? null,
+            is_live: input.isLive ? 1 : 0
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        // Cap: keep only the newest rows.
+        await tx
+          .deleteFrom("play_history")
+          .where("id", "<=", row.id - PLAY_HISTORY_CAP)
+          .execute();
+        return toPlayHistory(row);
+      });
+    },
+
+    async deletePlayHistory(id: number): Promise<void> {
+      await db.deleteFrom("play_history").where("id", "=", id).execute();
+    },
+
+    async clearPlayHistory(): Promise<void> {
+      await db.deleteFrom("play_history").execute();
     },
 
     async listEqPresets(): Promise<EqPreset[]> {
@@ -602,6 +650,34 @@ function toRecentlyPlayed(row: {
     album: row.album,
     albumArtUri: row.image,
     playedAt: row.played_at
+  };
+}
+
+function toPlayHistory(row: {
+  id: number;
+  played_at: string;
+  group_id: string;
+  rooms: string;
+  title: string;
+  artist: string | null;
+  album: string | null;
+  image: string | null;
+  source_id: string | null;
+  track_id: string | null;
+  is_live: number;
+}): PlayHistoryEntry {
+  return {
+    id: row.id,
+    playedAt: row.played_at,
+    groupId: row.group_id,
+    rooms: row.rooms,
+    title: row.title,
+    artist: row.artist,
+    album: row.album,
+    albumArtUri: row.image,
+    sourceId: row.source_id,
+    trackId: row.track_id,
+    isLive: row.is_live !== 0
   };
 }
 

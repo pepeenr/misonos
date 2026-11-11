@@ -2,6 +2,7 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { AlarmInput, BridgeEvent, EqPayload, EqPreset, Favorite, NowPlaying, PlaybackMode, RecentlyViewedItem, RepeatMode, SonosGroup, SonosZone, SourceItemKind, TransportAction, VolumePayload, VolumeState } from "@misonos/sonos-protocol";
 import type { BridgeConfig } from "./config.js";
+import { PlayHistoryRecorder } from "./playHistory.js";
 import { QueueReturn } from "./queueReturn.js";
 import { pickSelectedGroup, SELECTED_GROUP_PREF, stepVolume } from "./selectedRoom.js";
 import { SonosEventManager } from "./sonosEvents.js";
@@ -109,6 +110,34 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
   });
   service.onEnqueue = (event) => queueReturn.onEnqueue(event.groupId, event);
 
+  // Every song as it starts in a room, for the main screen's History.
+  const playHistory = new PlayHistoryRecorder({
+    groupOf: async (groupId) => {
+      const group = (await service.cachedSnapshot()).groups.find((candidate) => candidate.id === groupId);
+      if (!group) return undefined;
+      const names = [...new Set(group.zones.filter((zone) => zone.visible !== false).map((zone) => zone.name))];
+      return { coordinatorId: group.coordinatorId, rooms: names.join(" + ") || group.coordinatorName };
+    },
+    refOf: (uri) => service.refFromQueueUri(uri),
+    add: (entry) => store.addPlayHistory(entry),
+    remove: (id) => store.deletePlayHistory(id),
+    onChange: (change) => sendEvent({ type: "history", payload: change, at: new Date().toISOString() })
+  });
+
+  // Listen to the speakers from the start, not only once an app opens, so the history
+  // (and the queue return) keep up with no app open. Subscriptions renew themselves; this
+  // picks up rooms that were offline or regrouped while no app was polling.
+  const keepSubscribed = async () => {
+    if (clients.size > 0) return; // the poll below does it while an app is open
+    try {
+      await ensureSonosSubscriptions(await service.cachedSnapshot());
+    } catch (error) {
+      console.warn(`[bridge] speaker subscriptions: ${errorMessage(error)}`);
+    }
+  };
+  setTimeout(() => void keepSubscribed(), 1500).unref();
+  setInterval(() => void keepSubscribed(), 5 * 60_000).unref();
+
   // A pasted YouTube link: Downtify downloads it into Navidrome, and it plays from there.
   const youtube = new YouTubeImporter({
     endpoint: config.downtify,
@@ -186,6 +215,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       const nowPlaying = await service.nowPlaying(groupId);
       // Open apps poll this, which covers a Sonos event that never arrived.
       queueReturn.onNowPlaying(groupId, nowPlaying);
+      void playHistory.onNowPlaying(groupId, nowPlaying);
       return json(response, nowPlaying);
     }
 
@@ -693,6 +723,27 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       return empty(response, 204);
     }
 
+    // The main screen's History, newest first; `before` (an entry id) pages back.
+    if (url.pathname === "/api/history" && request.method === "GET") {
+      const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      const before = Number.parseInt(url.searchParams.get("before") ?? "", 10);
+      return json(response, await store.listPlayHistory(Number.isNaN(limit) ? undefined : limit, Number.isNaN(before) ? undefined : before));
+    }
+
+    const historyDeleteMatch = url.pathname.match(/^\/api\/history\/(\d+)\/delete$/);
+    if (historyDeleteMatch && request.method === "POST") {
+      const id = Number(historyDeleteMatch[1]);
+      await store.deletePlayHistory(id);
+      playHistory.forget(id);
+      return empty(response, 204);
+    }
+
+    if (url.pathname === "/api/history/clear" && request.method === "POST") {
+      await store.clearPlayHistory();
+      playHistory.forget();
+      return empty(response, 204);
+    }
+
     if (url.pathname === "/api/eq-presets") {
       if (request.method === "GET") return json(response, await store.listEqPresets());
       if (request.method === "POST") {
@@ -916,6 +967,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
         queueReturn.onNowPlaying(groupId, nowPlaying);
         await captureResume(groupId, nowPlaying);
         void recordPlayed(groupId, nowPlaying);
+        void playHistory.onNowPlaying(groupId, nowPlaying);
         sendEvent({ type: "now-playing", payload: nowPlaying, at: new Date().toISOString() });
       }
     } catch (error) {
