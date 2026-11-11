@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { NowPlaying, PlaybackMode, SourceBrowseItem, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
+import type { NowPlaying, PlaybackMode, SourceBrowseItem, YouTubeImportJob, YouTubeImportStatus, YouTubeLinkPreview, YouTubeSongNames } from "@misonos/sonos-protocol";
 import { DowntifyClient, DowntifyError, type DowntifyEndpoint, type DowntifyPairing, type DowntifySong } from "./downtify.js";
 
 // Paste a YouTube link, hear it on the speakers. Downtify downloads each song into the
@@ -20,12 +20,23 @@ export const MIX_SONGS = 10;
 // A song's length in Navidrome can be a second or two off YouTube's.
 const DURATION_SLACK_S = 3;
 const YOUTUBE_HOSTS = /(^|\.)(youtube\.com|youtu\.be)$/i;
+const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+// The longest file or folder name Downtify can write, in UTF-8 bytes: Linux allows 255,
+// less room for the ".webm.part" yt-dlp downloads into. Downtify doesn't shorten names,
+// so a longer one fails with "[Errno 36] Filename too long".
+export const FILE_NAME_BYTES = 240;
+// What a song whose YouTube names don't fit in a file name is saved as, with its video
+// id for a title (as `yt-dlp --parse-metadata "[%(id)s]:%(title)s"` would).
+export const FALLBACK_ARTIST = "YouTube";
+// Characters that print as nothing: Hangul fillers, the blank Braille cell, zero-width
+// spaces. Uploads use them for "blank" names.
+const INVISIBLE = /[\s\u115F\u1160\u3164\uFFA0\u2800\u200B-\u200D\u2060\uFEFF]/gu;
 
 export interface DowntifyApi {
   pair(code: string, deviceName: string): Promise<DowntifyPairing>;
   resolve(link: string): Promise<DowntifySong[]>;
   similar(artist: string, track: string, limit: number): Promise<DowntifySong[]>;
-  download(song: DowntifySong): Promise<string>;
+  download(song: DowntifySong, names?: YouTubeSongNames): Promise<string>;
 }
 
 export interface YouTubeImporterOptions {
@@ -39,6 +50,8 @@ export interface YouTubeImporterOptions {
   play: (trackIds: string[], groupId: string, mode: PlaybackMode) => Promise<NowPlaying>;
   /** Adds Navidrome tracks to the playlist. */
   addToPlaylist: (trackIds: string[]) => Promise<unknown>;
+  /** Streams a YouTube video on a group, saving nothing (the YouTube Music source). */
+  playVideo?: (videoId: string, groupId: string, mode: PlaybackMode) => Promise<NowPlaying>;
   onChange: (job: YouTubeImportJob) => void;
   client?: (endpoint: DowntifyEndpoint, token?: string) => DowntifyApi;
   findTimeoutMs?: number;
@@ -100,10 +113,21 @@ export class YouTubeImporter {
     return [...this.jobs];
   }
 
-  /** Starts getting a link's songs; the job reports its progress through onChange. */
-  async start(request: { url: string; groupId?: string; mode?: PlaybackMode }): Promise<YouTubeImportJob> {
+  /**
+   * Starts getting a link's songs; the job reports its progress through onChange. A
+   * single video can be saved under an artist and title of its own (`names`).
+   */
+  async start(request: { url: string; groupId?: string; mode?: PlaybackMode; names?: YouTubeSongNames }): Promise<YouTubeImportJob> {
     const endpoint = this.requireEndpoint();
     if (!isYouTubeLink(request.url)) throw new YouTubeImportError("That isn't a YouTube link", 400);
+    const names = givenNames(request.names);
+    if (names) {
+      if (youtubeLink(request.url).kind !== "video") {
+        throw new YouTubeImportError("Only a single video can be saved under an artist and title of its own", 400);
+      }
+      const fileName = [names.artist, names.title].filter(Boolean).join(" - ");
+      if (!fitsFileName(fileName)) throw new YouTubeImportError("That artist and title are too long for a file name", 400);
+    }
     const pairing = await this.readPairing();
     if (!pairing) throw new YouTubeImportError("Pair MiSonos with Downtify in Settings first", 409);
     const job: YouTubeImportJob = {
@@ -119,11 +143,56 @@ export class YouTubeImporter {
     const mode = request.mode === "end" ? "end" : "replace";
     // As it starts: the run goes on changing `job` itself.
     const reply = structuredClone(job);
-    void this.run(job, this.client(endpoint, pairing.token), mode);
+    void this.run(job, this.client(endpoint, pairing.token), mode, names);
     return reply;
   }
 
-  private async run(job: YouTubeImportJob, client: DowntifyApi, mode: "replace" | "end"): Promise<void> {
+  /**
+   * What a link is, for choosing between playing and downloading it: its kind, the
+   * video Play would play, and, for a single video, YouTube's own names (from Downtify,
+   * when paired) and what a download is saved as when those are too long for a file.
+   */
+  async preview(url: string): Promise<YouTubeLinkPreview> {
+    if (!isYouTubeLink(url)) throw new YouTubeImportError("That isn't a YouTube link", 400);
+    const link = youtubeLink(url);
+    const preview: YouTubeLinkPreview = { kind: link.kind, videoId: videoIdOf(url) };
+    const pairing = this.options.endpoint && link.kind === "video" ? await this.readPairing() : undefined;
+    if (!this.options.endpoint || !pairing) return preview;
+    let song: DowntifySong | undefined;
+    try {
+      song = (await this.client(this.options.endpoint, pairing.token).resolve(link.resolve))[0];
+    } catch {
+      return preview;
+    }
+    if (!song) return preview;
+    const saved = namesToSave(song);
+    return {
+      ...preview,
+      title: song.name,
+      artist: artistOf(song),
+      durationSeconds: song.duration,
+      ...(saved.shortened ? { shortenedTo: saved.names } : {})
+    };
+  }
+
+  /**
+   * Plays a link's video on a group without saving it: streamed through the YouTube
+   * Music source. A Mix link plays its song; a playlist link with no video can't play.
+   */
+  async playLink(request: { url: string; groupId?: string; mode?: PlaybackMode }): Promise<NowPlaying> {
+    if (!isYouTubeLink(request.url)) throw new YouTubeImportError("That isn't a YouTube link", 400);
+    if (!this.options.playVideo) throw new YouTubeImportError("Playing YouTube links isn't set up", 503);
+    if (!request.groupId) throw new YouTubeImportError("Pick a Sonos room to play it on", 400);
+    const videoId = videoIdOf(request.url);
+    if (!videoId) throw new YouTubeImportError("Play takes a single video; Download gets the whole playlist", 400);
+    try {
+      return await this.options.playVideo(videoId, request.groupId, request.mode === "end" ? "end" : "replace");
+    } catch (error) {
+      throw new YouTubeImportError(`Couldn't play it: ${errorText(error)}`, 502);
+    }
+  }
+
+  private async run(job: YouTubeImportJob, client: DowntifyApi, mode: "replace" | "end", asked?: YouTubeSongNames): Promise<void> {
     this.emit(job);
     try {
       const link = youtubeLink(job.url);
@@ -143,12 +212,21 @@ export class YouTubeImporter {
           // tagged from the video's own details, and that's what Navidrome will show.
           const own = songs.length > 1 ? (await client.resolve(watchUrl(listed)).catch(() => []))[0] : undefined;
           const song: DowntifySong = { ...listed, ...own };
-          track.title = song.name || track.title;
-          track.artist = artistOf(song) ?? track.artist;
-          await client.download(song);
+          // The names asked for, or YouTube's own unless they don't fit in a file name.
+          const saved = namesToSave(song, asked);
+          if (saved.shortened) job.note ??= `YouTube's name for a song was too long for a file, so it's saved as “${saved.names.artist ?? artistOf(song)} - ${saved.names.title ?? song.name}”.`;
+          const named: DowntifySong = {
+            ...song,
+            name: saved.names.title ?? song.name,
+            artists: saved.names.artist ? [saved.names.artist] : song.artists
+          };
+          track.title = named.name || track.title;
+          track.artist = artistOf(named) ?? track.artist;
+          this.emit(job);
+          await client.download(song, saved.names.artist || saved.names.title ? saved.names : undefined);
           track.status = "finding";
           this.emit(job);
-          const trackId = await this.find(song);
+          const trackId = await this.find(named);
           // A song that plays but missed the playlist is still worth having: say so once.
           await this.options.addToPlaylist([trackId]).catch((error: unknown) => {
             job.note ??= `Couldn't add songs to the ${this.options.playlist} playlist: ${errorText(error)}.`;
@@ -249,7 +327,7 @@ export function isYouTubeLink(text: string): boolean {
 export function youtubeLink(text: string): { kind: "video" | "playlist" | "mix"; resolve: string } {
   const url = new URL(text.trim());
   const list = url.searchParams.get("list");
-  const video = url.searchParams.get("v") ?? (/youtu\.be$/i.test(url.hostname) ? url.pathname.slice(1) : undefined);
+  const video = videoIdOf(text);
   if (!list) return { kind: "video", resolve: text.trim() };
   if (isRadioMix(list)) {
     // A song's own Mix is "RD" + its video id.
@@ -262,6 +340,70 @@ export function youtubeLink(text: string): { kind: "video" | "playlist" | "mix";
 // "RD…" lists are generated radio; "RDCLAK5uy_…" ones are YouTube Music's curated playlists.
 function isRadioMix(list: string): boolean {
   return list.startsWith("RD") && !list.startsWith("RDCLAK5uy_");
+}
+
+/**
+ * The video a link points at: watch?v=, youtu.be/, /shorts/, /live/, or the song a
+ * Mix (list=RD + its id) was started from. Undefined for a plain playlist.
+ */
+export function videoIdOf(text: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return undefined;
+  }
+  const list = url.searchParams.get("list") ?? "";
+  const candidates = [
+    url.searchParams.get("v"),
+    /youtu\.be$/i.test(url.hostname) ? url.pathname.slice(1) : undefined,
+    /^\/(shorts|live|embed)\/([^/]+)/.exec(url.pathname)?.[2],
+    isRadioMix(list) ? list.slice(2) : undefined
+  ];
+  return candidates.find((candidate): candidate is string => Boolean(candidate && VIDEO_ID.test(candidate)));
+}
+
+/** Fits in a file name Downtify can write (see FILE_NAME_BYTES). */
+export function fitsFileName(name: string): boolean {
+  return Buffer.byteLength(name, "utf8") <= FILE_NAME_BYTES;
+}
+
+/** Prints as something: not empty, and not only invisible characters. */
+export function isVisibleName(name: string | undefined): boolean {
+  return Boolean(name && name.replace(INVISIBLE, ""));
+}
+
+/**
+ * The artist and title a song is saved under: those asked for, else YouTube's own.
+ * YouTube's own are replaced when they make a file or folder name too long, or print
+ * as nothing: the title by the video id, the artist by FALLBACK_ARTIST. Downtify names
+ * the file "<artists> - <title>" (its default template) inside a folder of the album
+ * artist.
+ */
+export function namesToSave(song: DowntifySong, asked?: YouTubeSongNames): { names: YouTubeSongNames; shortened: boolean } {
+  const names: YouTubeSongNames = { ...givenNames(asked) };
+  const folder = () => names.artist ?? song.album_artist ?? song.artists?.[0] ?? "";
+  const file = () => `${names.artist ?? (song.artists ?? []).join(", ")} - ${names.title ?? song.name ?? ""}`;
+  let shortened = false;
+  // A missing name is Downtify's to fill ("Unknown"); one that's there must print.
+  const blank = (name: string | undefined) => Boolean(name) && !isVisibleName(name);
+  if (!names.title && song.song_id && (!fitsFileName(file()) || blank(song.name))) {
+    names.title = song.song_id;
+    shortened = true;
+  }
+  if (!names.artist && (!fitsFileName(folder()) || !fitsFileName(file()) || blank(folder()))) {
+    names.artist = FALLBACK_ARTIST;
+    shortened = true;
+  }
+  return { names, shortened };
+}
+
+// The names a request gives, trimmed; undefined when it gives none.
+function givenNames(names?: YouTubeSongNames): YouTubeSongNames | undefined {
+  const artist = typeof names?.artist === "string" ? names.artist.trim() : "";
+  const title = typeof names?.title === "string" ? names.title.trim() : "";
+  if (!artist && !title) return undefined;
+  return { ...(artist ? { artist } : {}), ...(title ? { title } : {}) };
 }
 
 /** The Navidrome track that is this song: same title and length, the artist breaking a tie. */
