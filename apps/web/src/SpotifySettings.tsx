@@ -159,6 +159,9 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
   const hasClientId = client.source !== "none";
   const selected = accounts?.selected;
   const pinnedByEnv = selected?.origin === "env";
+  const mainAccountName = status.signedIn ? status.user?.displayName || status.user?.id || "your Spotify account" : undefined;
+  const connectUrl = (profile?: string) =>
+    apiUrl(`/api/sources/spotify/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}${profile ? `&profile=${encodeURIComponent(profile)}` : ""}`);
 
   return (
     <SettingsCard id="spotify" title="Spotify">
@@ -240,15 +243,18 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
         <>
           <h4 className="settings-card-subhead">2. Your Spotify account</h4>
           {status.signedIn ? (
-            <div className="settings-card-row">
-              <span>Connected as {status.user?.displayName || status.user?.id || "your Spotify account"}.</span>
-              <button type="button" disabled={busy} onClick={() => void change(() => bridgeApi.spotifyLogout(), "Couldn't disconnect")}>Disconnect</button>
-            </div>
+            <>
+              <div className="settings-card-row">
+                <span>Connected as {mainAccountName}.</span>
+                <button type="button" disabled={busy} onClick={() => void change(() => bridgeApi.spotifyLogout(), "Couldn't disconnect")}>Disconnect</button>
+              </div>
+              <p className="settings-card-help">Music shows this account's library, unless a Sonos login below has an account of its own.</p>
+            </>
           ) : (
             <>
               <div className="settings-card-row">
                 <span>Not connected.</span>
-                <button type="button" disabled={busy} onClick={() => window.location.assign(apiUrl(`/api/sources/spotify/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}`))}>
+                <button type="button" disabled={busy} onClick={() => window.location.assign(connectUrl())}>
                   Connect Spotify
                 </button>
               </div>
@@ -284,6 +290,12 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
                     ? `${accounts.accounts.length} Spotify logins are linked in the Sonos app. Sonos only numbers them, without names, so each is listed with the Sonos Favorites (or queued songs) that use it. Pick the one songs play on, and name them (Mia, Pepe): while Spotify plays, the main screen switches between the named ones.`
                     : "Songs play on the Spotify login linked in the Sonos app."}
               </p>
+              {accounts.accounts.length > 1 ? (
+                <p className="settings-card-help">
+                  Connect each login's own Spotify account to see its playlists and library in Music. Spotify only lets
+                  accounts sign in that are listed under User Management on your Spotify app (up to five).
+                </p>
+              ) : null}
               <div className="settings-card-row settings-card-column" role="radiogroup" aria-label="Sonos Spotify login">
                 {accounts.accounts.map((account) => {
                   const checked = selected?.sid === account.sid && selected.sn === account.sn;
@@ -314,6 +326,13 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
                         onBlur={(event) => void saveName(account, event.currentTarget.value)}
                         onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                       />
+                      <LoginLibrary
+                        own={status.profiles?.[accountKey(account)]}
+                        fallback={mainAccountName}
+                        busy={busy}
+                        onConnect={() => window.location.assign(connectUrl(accountKey(account)))}
+                        onDisconnect={() => void change(() => bridgeApi.spotifyLogout(accountKey(account)), "Couldn't disconnect")}
+                      />
                     </div>
                   );
                 })}
@@ -323,5 +342,30 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
         </>
       ) : null}
     </SettingsCard>
+  );
+}
+
+/** Whose library Music shows for a Sonos login, and a way to give the login its own account. */
+function LoginLibrary({ own, fallback, busy, onConnect, onDisconnect }: {
+  own?: { id: string; displayName?: string };
+  fallback?: string;
+  busy: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+}) {
+  return (
+    <div className="spotify-login-library">
+      {own ? (
+        <>
+          <span>Music shows {own.displayName || own.id}&rsquo;s library.</span>
+          <button type="button" className="secondary" disabled={busy} onClick={onDisconnect}>Disconnect</button>
+        </>
+      ) : (
+        <>
+          <span>{fallback ? `Music shows ${fallback}'s library.` : "No Spotify account connected."}</span>
+          <button type="button" disabled={busy} onClick={onConnect}>{fallback ? "Connect its own account" : "Connect Spotify"}</button>
+        </>
+      )}
+    </div>
   );
 }

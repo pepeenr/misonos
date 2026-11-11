@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SpotifyAccountsView } from "@misonos/sonos-protocol";
 import { bridgeApi } from "./api.js";
 import { accountKey, loginChoices, loginLabel } from "./spotifyLogins.js";
@@ -37,20 +37,28 @@ export function profilesOf(view: SpotifyAccountsView | null): SpotifyProfile[] {
 }
 
 /**
- * The household's Spotify logins, loaded while `enabled` (Music is on screen and has
- * Spotify), so a name given in Settings shows the next time Music opens.
+ * The household's Spotify logins, once Music offers Spotify (`enabled`): loaded once in
+ * the background, then again each time Music comes on screen (`visible`), so a name
+ * given in Settings shows there. `loaded` turns true after the first answer (or failure).
  */
-export function useSpotifyProfiles(enabled: boolean) {
+export function useSpotifyProfiles(enabled: boolean, visible: boolean) {
   const [view, setView] = useState<SpotifyAccountsView | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || (loadedRef.current && !visible)) return;
     let cancelled = false;
     bridgeApi.spotifyAccounts()
       .then((next) => { if (!cancelled) setView(next); })
-      .catch(() => { /* Spotify then shows as one button */ });
+      .catch(() => { /* Spotify then shows as one button, browsing the main account */ })
+      .finally(() => {
+        if (cancelled) return;
+        loadedRef.current = true;
+        setLoaded(true);
+      });
     return () => { cancelled = true; };
-  }, [enabled]);
+  }, [enabled, visible]);
 
   const choose = useCallback(async (profile: SpotifyProfile) => {
     await bridgeApi.setPreference(SPOTIFY_ACCOUNT_PREF, { sid: profile.sid, sn: profile.sn, token: profile.token });
@@ -60,6 +68,7 @@ export function useSpotifyProfiles(enabled: boolean) {
   return {
     profiles: profilesOf(view),
     selectedKey: view?.selected ? accountKey(view.selected) : undefined,
+    loaded,
     choose
   };
 }

@@ -4264,3 +4264,21 @@ small {
   background: rgba(145, 211, 196, 0.16);
   color: #91d3c4;
 }
+
+/* Under a Sonos Spotify login in Settings: whose library Music shows for it. */
+.spotify-login-library {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding-left: 24px;
+  font-size: 0.82rem;
+  color: #aeb4ad;
+}
+
+.settings-card-body .spotify-login-library button {
+  padding: 5px 10px;
+  font-size: 0.8rem;
+}

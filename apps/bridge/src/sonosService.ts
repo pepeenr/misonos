@@ -704,12 +704,12 @@ export class SonosService {
     return listSources(disabled);
   }
 
-  browseSource(sourceId: string, id?: string): Promise<SourceBrowseResponse> {
-    return browseSource(sourceId, id);
+  browseSource(sourceId: string, id?: string, profile?: string): Promise<SourceBrowseResponse> {
+    return browseSource(sourceId, id, profile);
   }
 
-  searchSource(sourceId: string, query: string, type?: string): Promise<SourceBrowseResponse> {
-    return searchSource(sourceId, query, type);
+  searchSource(sourceId: string, query: string, type?: string, profile?: string): Promise<SourceBrowseResponse> {
+    return searchSource(sourceId, query, type, profile);
   }
 
   sourceAuthStatus(sourceId: string): Promise<unknown> {
@@ -728,16 +728,16 @@ export class SonosService {
     return sourceSubscriptions(sourceId);
   }
 
-  sourceAuthLogin(sourceId: string, redirectUri: string): Promise<{ url: string }> {
-    return sourceAuthLogin(sourceId, redirectUri);
+  sourceAuthLogin(sourceId: string, redirectUri: string, profile?: string): Promise<{ url: string }> {
+    return sourceAuthLogin(sourceId, redirectUri, profile);
   }
 
   sourceAuthCallback(sourceId: string, query: URLSearchParams): Promise<unknown> {
     return sourceAuthCallback(sourceId, query);
   }
 
-  sourceAuthLogout(sourceId: string): Promise<unknown> {
-    return sourceAuthLogout(sourceId);
+  sourceAuthLogout(sourceId: string, profile?: string): Promise<unknown> {
+    return sourceAuthLogout(sourceId, profile);
   }
 
   // The Spotify accounts linked on this Sonos system, read off the Spotify items in

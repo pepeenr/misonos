@@ -306,6 +306,9 @@ export interface SpotifyAuthStatus {
   configured: boolean;
   signedIn: boolean;
   user?: { id: string; displayName?: string };
+  // Accounts connected for a Sonos Spotify login of their own, by "sid:sn". Music
+  // browses a login's library with its account, else with the one above.
+  profiles?: Record<string, { id: string; displayName?: string }>;
   // Set when MISONOS_SPOTIFY_REDIRECT_URI pins the redirect URI.
   redirectUri?: string | null;
 }

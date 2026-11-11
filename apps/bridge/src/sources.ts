@@ -110,12 +110,15 @@ export async function listSourceSettings(disabled: ReadonlySet<string>): Promise
   );
 }
 
-export async function browseSource(sourceId: string, id?: string): Promise<SourceBrowseResponse> {
+// `profile` names an account of the source's own to browse as: for Spotify, the Sonos
+// login ("9:5") whose library to show. Other sources ignore it.
+export async function browseSource(sourceId: string, id?: string, profile?: string): Promise<SourceBrowseResponse> {
   const config = requireConfig(sourceId);
   const info = await fetchInfo(config);
   const queryId = id ?? info.rootId;
   const target = new URL("/browse", config.baseUrl);
   target.searchParams.set("id", queryId);
+  if (profile) target.searchParams.set("profile", profile);
   const result = await fetchJson<SourceBrowseResponse>(target, undefined, BROWSE_TIMEOUT_MS);
   return {
     ...result,
@@ -148,11 +151,12 @@ export async function fetchSpotifyTrackArtist(trackUri: string): Promise<{ id: s
   return fetchJson<{ id: string; name: string }>(target);
 }
 
-export async function searchSource(sourceId: string, query: string, type?: string): Promise<SourceBrowseResponse> {
+export async function searchSource(sourceId: string, query: string, type?: string, profile?: string): Promise<SourceBrowseResponse> {
   const config = requireConfig(sourceId);
   const target = new URL("/search", config.baseUrl);
   target.searchParams.set("q", query);
   if (type) target.searchParams.set("type", type);
+  if (profile) target.searchParams.set("profile", profile);
   return fetchJson<SourceBrowseResponse>(target);
 }
 
@@ -178,10 +182,11 @@ export async function sourceAuthClearCookies(sourceId: string): Promise<unknown>
 
 // OAuth sign-in for sources that link an account (Spotify): the source returns the
 // provider URL to send the browser to, then completes the login from the callback query.
-export async function sourceAuthLogin(sourceId: string, redirectUri: string): Promise<{ url: string }> {
+export async function sourceAuthLogin(sourceId: string, redirectUri: string, profile?: string): Promise<{ url: string }> {
   const config = requireConfig(sourceId);
   const target = new URL("/auth/login", config.baseUrl);
   target.searchParams.set("redirect_uri", redirectUri);
+  if (profile) target.searchParams.set("profile", profile);
   return fetchJson<{ url: string }>(target);
 }
 
@@ -193,9 +198,11 @@ export async function sourceAuthCallback(sourceId: string, query: URLSearchParam
   return fetchJson<unknown>(target, undefined, BROWSE_TIMEOUT_MS);
 }
 
-export async function sourceAuthLogout(sourceId: string): Promise<unknown> {
+export async function sourceAuthLogout(sourceId: string, profile?: string): Promise<unknown> {
   const config = requireConfig(sourceId);
-  return fetchJson<unknown>(new URL("/auth/logout", config.baseUrl), { method: "POST" });
+  const target = new URL("/auth/logout", config.baseUrl);
+  if (profile) target.searchParams.set("profile", profile);
+  return fetchJson<unknown>(target, { method: "POST" });
 }
 
 export async function sourceSubscriptions(sourceId: string): Promise<unknown> {

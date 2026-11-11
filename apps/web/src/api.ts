@@ -160,13 +160,18 @@ export const bridgeApi = {
     request<SourceLoginStatus>(`/api/sources/${encodeURIComponent(sourceId)}/config`, { method: "POST", body: JSON.stringify(login) }),
   clearSourceLogin: (sourceId: string) =>
     request<SourceLoginStatus>(`/api/sources/${encodeURIComponent(sourceId)}/config/clear`, { method: "POST", body: "{}" }),
-  browseSource: (sourceId: string, id?: string) => {
-    const query = id ? `?id=${encodeURIComponent(id)}` : "";
+  // `profile`: the account to browse as (Spotify: a Sonos login, "9:5"); others ignore it.
+  browseSource: (sourceId: string, id?: string, profile?: string) => {
+    const params = new URLSearchParams();
+    if (id) params.set("id", id);
+    if (profile) params.set("profile", profile);
+    const query = params.toString() ? `?${params.toString()}` : "";
     return request<SourceBrowseResponse>(`/api/sources/${encodeURIComponent(sourceId)}/browse${query}`);
   },
-  searchSource: (sourceId: string, query: string, type?: string) => {
+  searchSource: (sourceId: string, query: string, type?: string, profile?: string) => {
     const typeParam = type ? `&type=${encodeURIComponent(type)}` : "";
-    return request<SourceBrowseResponse>(`/api/sources/${encodeURIComponent(sourceId)}/search?q=${encodeURIComponent(query)}${typeParam}`);
+    const profileParam = profile ? `&profile=${encodeURIComponent(profile)}` : "";
+    return request<SourceBrowseResponse>(`/api/sources/${encodeURIComponent(sourceId)}/search?q=${encodeURIComponent(query)}${typeParam}${profileParam}`);
   },
   // Pasted YouTube links, which Downtify downloads into Navidrome (bridge youtubeImport.ts).
   youtubeStatus: () => request<YouTubeImportStatus>("/api/youtube/status"),
@@ -186,7 +191,8 @@ export const bridgeApi = {
   saveSpotifyClient: (clientId: string) =>
     request<SpotifyClientStatus>("/api/sources/spotify/config", { method: "POST", body: JSON.stringify({ clientId }) }),
   clearSpotifyClient: () => request<SpotifyClientStatus>("/api/sources/spotify/config/clear", { method: "POST", body: "{}" }),
-  spotifyLogout: () => request<{ signedIn: false }>("/api/sources/spotify/auth/logout", { method: "POST", body: "{}" }),
+  spotifyLogout: (profile?: string) =>
+    request<{ signedIn: false }>(`/api/sources/spotify/auth/logout${profile ? `?profile=${encodeURIComponent(profile)}` : ""}`, { method: "POST", body: "{}" }),
   spotifyAccounts: (refresh = false) => request<SpotifyAccountsView>(`/api/spotify/accounts${refresh ? "?refresh=1" : ""}`),
   /** Play Spotify on another linked login, from now on and for what plays now. */
   setSpotifyAccount: (groupId: string, account: { sid: number; sn: number }) =>
