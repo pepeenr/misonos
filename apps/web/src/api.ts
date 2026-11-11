@@ -1,4 +1,4 @@
-import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, PlayHistoryEntry, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus, TransportAction, VolumePayload, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
+import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, PlayHistoryEntry, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus, TransportAction, VolumePayload, VolumeState, YouTubeImportJob, YouTubeImportStatus, YouTubeLinkPreview } from "@misonos/sonos-protocol";
 import { noteBridgeFailure } from "./accessSession.js";
 import { apiUrl } from "./servers.js";
 
@@ -173,8 +173,12 @@ export const bridgeApi = {
   pairYouTube: (code: string) =>
     request<YouTubeImportStatus>("/api/youtube/pair", { method: "POST", body: JSON.stringify({ code }) }),
   unpairYouTube: () => request<YouTubeImportStatus>("/api/youtube/unpair", { method: "POST", body: "{}" }),
-  importYouTube: (body: { url: string; groupId?: string; mode?: PlaybackMode }) =>
+  importYouTube: (body: { url: string; groupId?: string; mode?: PlaybackMode; artist?: string; title?: string }) =>
     request<YouTubeImportJob>("/api/youtube/import", { method: "POST", body: JSON.stringify(body) }),
+  youtubePreview: (url: string) => request<YouTubeLinkPreview>(`/api/youtube/preview?url=${encodeURIComponent(url)}`),
+  // Streams the link's video on the room through the YouTube Music source, saving nothing.
+  playYouTube: (body: { url: string; groupId: string; mode?: PlaybackMode }) =>
+    request<NowPlaying>("/api/youtube/play", { method: "POST", body: JSON.stringify(body) }),
   sourceAuthStatus: (sourceId: string) =>
     request<{ cookieAuth?: "signed-in" | "signed-out" }>(`/api/sources/${encodeURIComponent(sourceId)}/auth/status`),
   sourceAuthSetCookies: (sourceId: string, paste: string) =>

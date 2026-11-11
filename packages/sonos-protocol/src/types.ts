@@ -546,6 +546,28 @@ export interface YouTubeImportJob {
   finishedAt?: string;
 }
 
+/** A song's own artist and title, given instead of YouTube's. */
+export interface YouTubeSongNames {
+  artist?: string;
+  title?: string;
+}
+
+/** What a pasted YouTube link is, for the play-or-download choice under the search box. */
+export interface YouTubeLinkPreview {
+  kind: "video" | "playlist" | "mix";
+  /** The video the link points at, which Play plays. Unset for a playlist link with no video in it. */
+  videoId?: string;
+  /** YouTube's own title and channel, when Downtify could look the video up. */
+  title?: string;
+  artist?: string;
+  durationSeconds?: number;
+  /**
+   * Set when YouTube's own names are too long for a file name: what a download is
+   * saved as instead, unless an artist and title are given.
+   */
+  shortenedTo?: YouTubeSongNames;
+}
+
 export type BridgeEvent =
   | { type: "snapshot"; payload: BridgeSnapshot; at: string }
   | { type: "now-playing"; payload: NowPlaying; at: string }

@@ -2,9 +2,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NowPlaying, PlaybackMode, SourceBrowseItem, YouTubeImportJob } from "@misonos/sonos-protocol";
+import type { NowPlaying, PlaybackMode, SourceBrowseItem, YouTubeImportJob, YouTubeSongNames } from "@misonos/sonos-protocol";
 import type { DowntifySong } from "../src/downtify.js";
-import { isYouTubeLink, MIX_SONGS, pickTrack, youtubeLink, YouTubeImporter, YouTubeImportError, type DowntifyApi } from "../src/youtubeImport.js";
+import { FALLBACK_ARTIST, isYouTubeLink, MIX_SONGS, namesToSave, pickTrack, videoIdOf, youtubeLink, YouTubeImporter, YouTubeImportError, type DowntifyApi } from "../src/youtubeImport.js";
+
+// A YouTube upload named with Hangul fillers ("ㅤ", three bytes each): too long for a file.
+const PADDED = { song_id: "8h4xp8OREjs", name: "ㅤ".repeat(100), artists: ["ㅤ".repeat(46) + "ꞋꞌꞋꞌ"], duration: 3540 };
 
 const ENDPOINT = { url: "http://127.0.0.1", host: "downtify.example" };
 
@@ -31,6 +34,43 @@ describe("youtubeLink", () => {
     expect(youtubeLink("https://www.youtube.com/playlist?list=RD_ltWsgnR9Gw").kind).toBe("mix");
     // YouTube Music's curated playlists start with RD too, but aren't radio.
     expect(youtubeLink("https://music.youtube.com/playlist?list=RDCLAK5uy_abc").kind).toBe("playlist");
+  });
+});
+
+describe("videoIdOf", () => {
+  it("finds the video in each kind of link, and none in a plain playlist", () => {
+    expect(videoIdOf("https://www.youtube.com/watch?v=8h4xp8OREjs")).toBe("8h4xp8OREjs");
+    expect(videoIdOf("https://youtu.be/8h4xp8OREjs?si=abc")).toBe("8h4xp8OREjs");
+    expect(videoIdOf("https://www.youtube.com/shorts/8h4xp8OREjs")).toBe("8h4xp8OREjs");
+    expect(videoIdOf("https://music.youtube.com/watch?v=8h4xp8OREjs&list=PLxyz")).toBe("8h4xp8OREjs");
+    expect(videoIdOf("https://www.youtube.com/playlist?list=RD8h4xp8OREjs")).toBe("8h4xp8OREjs");
+    expect(videoIdOf("https://www.youtube.com/playlist?list=PLxyz")).toBeUndefined();
+    expect(videoIdOf("https://www.youtube.com/watch?v=short")).toBeUndefined();
+  });
+});
+
+describe("namesToSave", () => {
+  it("keeps YouTube's names when they fit, and takes the ones asked for", () => {
+    const song = { song_id: "aaaaaaaaaaa", name: "Ripple", artists: ["Grateful Dead"] };
+    expect(namesToSave(song)).toEqual({ names: {}, shortened: false });
+    expect(namesToSave(song, { artist: " jazzhousestudio ", title: "" })).toEqual({ names: { artist: "jazzhousestudio" }, shortened: false });
+  });
+
+  it("saves a song whose names are too long for a file under its video id", () => {
+    // The channel (150 bytes) fits as a folder and next to the id: only the title goes.
+    expect(namesToSave(PADDED)).toEqual({ names: { title: "8h4xp8OREjs" }, shortened: true });
+    const longChannel = { ...PADDED, artists: ["ㅤ".repeat(90)] };
+    expect(namesToSave(longChannel)).toEqual({ names: { artist: FALLBACK_ARTIST, title: "8h4xp8OREjs" }, shortened: true });
+    // The artist folder alone fits (150 bytes): only the file name was too long.
+    expect(namesToSave({ ...PADDED, name: "Tired" }).shortened).toBe(false);
+    expect(namesToSave(PADDED, { artist: "jazzhousestudio" })).toEqual({ names: { artist: "jazzhousestudio", title: "8h4xp8OREjs" }, shortened: true });
+    expect(namesToSave(PADDED, { artist: "jazzhousestudio", title: "Tired" })).toEqual({ names: { artist: "jazzhousestudio", title: "Tired" }, shortened: false });
+  });
+
+  it("replaces names that print as nothing, however short", () => {
+    const blank = { song_id: "8h4xp8OREjs", name: "ㅤㅤ​", artists: ["ㅤ ⠀"] };
+    expect(namesToSave(blank)).toEqual({ names: { artist: FALLBACK_ARTIST, title: "8h4xp8OREjs" }, shortened: true });
+    expect(namesToSave({ ...blank, name: "Tired" }).names).toEqual({ artist: FALLBACK_ARTIST });
   });
 });
 
@@ -63,12 +103,14 @@ describe("YouTubeImporter", () => {
   });
 
   // Navidrome "has" a song once Downtify has downloaded it, after `lag` searches.
-  function setup(songs: DowntifySong[], options: { failDownload?: string; lag?: number; ownTitles?: Record<string, string>; mix?: DowntifySong[] | Error; playlistFails?: boolean } = {}) {
-    const downloaded = new Set<string>();
+  function setup(songs: DowntifySong[], options: { failDownload?: string; lag?: number; ownTitles?: Record<string, string>; mix?: DowntifySong[] | Error; playlistFails?: boolean; resolveFails?: boolean } = {}) {
+    // Navidrome lists a song under the title it was saved with.
+    const downloaded = new Map<string, DowntifySong>();
     const searches = new Map<string, number>();
-    const downloads: Array<{ song: DowntifySong }> = [];
+    const downloads: Array<{ song: DowntifySong; names?: YouTubeSongNames }> = [];
     const added: string[] = [];
     const plays: Array<{ trackIds: string[]; groupId: string; mode: PlaybackMode }> = [];
+    const videoPlays: Array<{ videoId: string; groupId: string; mode: PlaybackMode }> = [];
     const events: YouTubeImportJob[] = [];
     const resolved: string[] = [];
     const similar: unknown[][] = [];
@@ -82,6 +124,7 @@ describe("YouTubeImporter", () => {
       },
       resolve: async (link) => {
         resolved.push(link);
+        if (options.resolveFails) throw new Error("Downtify answered 502");
         const id = new URL(link).searchParams.get("v");
         if (id) {
           const song = songs.find((entry) => entry.song_id === id);
@@ -94,11 +137,11 @@ describe("YouTubeImporter", () => {
         if (options.mix instanceof Error) throw options.mix;
         return options.mix ?? [];
       },
-      download: async (song) => {
-        downloads.push({ song });
+      download: async (song, names) => {
+        downloads.push(names ? { song, names } : { song });
         if (song.song_id === options.failDownload) throw new Error("Video unavailable");
-        downloaded.add(song.name ?? "");
-        return `YouTube/${song.name}.opus`;
+        downloaded.set(names?.title ?? song.name ?? "", song);
+        return `YouTube/${names?.title ?? song.name}.opus`;
       }
     };
     const importer = new YouTubeImporter({
@@ -108,12 +151,16 @@ describe("YouTubeImporter", () => {
       search: async (query) => {
         const count = (searches.get(query) ?? 0) + 1;
         searches.set(query, count);
-        if (!downloaded.has(query) || count <= (options.lag ?? 0)) return [];
-        const song = songs.find((entry) => (options.ownTitles?.[entry.song_id ?? ""] ?? entry.name) === query);
-        return [{ id: "section:songs", title: "Songs", kind: "section" }, track(`nd:${song?.song_id}`, query, song?.duration)];
+        const song = downloaded.get(query);
+        if (!song || count <= (options.lag ?? 0)) return [];
+        return [{ id: "section:songs", title: "Songs", kind: "section" }, track(`nd:${song.song_id}`, query, song.duration)];
       },
       play: async (trackIds, groupId, mode) => {
         plays.push({ trackIds, groupId, mode });
+        return { groupId, state: "PLAYING", updatedAt: new Date().toISOString() } as NowPlaying;
+      },
+      playVideo: async (videoId, groupId, mode) => {
+        videoPlays.push({ videoId, groupId, mode });
         return { groupId, state: "PLAYING", updatedAt: new Date().toISOString() } as NowPlaying;
       },
       addToPlaylist: async (trackIds) => {
@@ -131,7 +178,7 @@ describe("YouTubeImporter", () => {
       findPollMs: 1,
       findTimeoutMs: 200
     });
-    return { importer, downloads, added, plays, events, done, resolved, similar, tokenUsed: () => tokenUsed };
+    return { importer, downloads, added, plays, videoPlays, events, done, resolved, similar, tokenUsed: () => tokenUsed };
   }
 
   it("pairs with a Downtify code and keeps the token", async () => {
@@ -240,6 +287,75 @@ describe("YouTubeImporter", () => {
     await importer.start({ url: "https://youtu.be/aaaaaaaaaaa", groupId: "g1" });
     const job = await done;
     expect(job).toMatchObject({ status: "failed", error: "Downloaded, but Navidrome hasn't picked it up yet" });
+  });
+
+  it("saves a video under the artist and title given, and plays it", async () => {
+    const song = { song_id: "8h4xp8OREjs", name: "Music for People Who Are Tired", artists: ["Some Channel"], duration: 3540 };
+    const { importer, downloads, added, plays, done } = setup([song]);
+    await importer.pair("123456");
+
+    await importer.start({ url: "https://www.youtube.com/watch?v=8h4xp8OREjs", groupId: "g1", names: { artist: " jazzhousestudio ", title: "Tired" } });
+    const job = await done;
+
+    expect(downloads).toEqual([{ song, names: { artist: "jazzhousestudio", title: "Tired" } }]);
+    expect(added).toEqual(["nd:8h4xp8OREjs"]);
+    expect(plays).toEqual([{ trackIds: ["nd:8h4xp8OREjs"], groupId: "g1", mode: "replace" }]);
+    expect(job).toMatchObject({ status: "done", tracks: [{ title: "Tired", artist: "jazzhousestudio", status: "playing" }] });
+    expect(job.note).toBeUndefined();
+  });
+
+  it("saves a video whose own names don't fit in a file name under its id, and says so", async () => {
+    const { importer, downloads, done } = setup([PADDED]);
+    await importer.pair("123456");
+
+    await importer.start({ url: "https://youtu.be/8h4xp8OREjs", groupId: "g1" });
+    const job = await done;
+
+    const channel = PADDED.artists[0];
+    expect(downloads[0].names).toEqual({ title: "8h4xp8OREjs" });
+    expect(job).toMatchObject({ status: "done", tracks: [{ title: "8h4xp8OREjs", artist: channel, status: "playing" }] });
+    expect(job.note).toBe(`YouTube's name for a song was too long for a file, so it's saved as “${channel} - 8h4xp8OREjs”.`);
+  });
+
+  it("turns away names for a playlist, and names too long for a file", async () => {
+    const { importer } = setup([]);
+    await importer.pair("123456");
+    await expect(importer.start({ url: "https://www.youtube.com/playlist?list=PLxyz", groupId: "g1", names: { title: "Mine" } })).rejects.toMatchObject({ status: 400 });
+    await expect(importer.start({ url: "https://youtu.be/8h4xp8OREjs", names: { title: "ㅤ".repeat(81) } })).rejects.toMatchObject({ status: 400 });
+    // Empty fields are no names at all.
+    await expect(importer.start({ url: "https://www.youtube.com/playlist?list=PLxyz", names: { artist: " ", title: "" } })).resolves.toMatchObject({ status: "resolving" });
+  });
+
+  it("plays a link's video without downloading it", async () => {
+    const { importer, videoPlays, downloads } = setup([]);
+    await importer.playLink({ url: "https://www.youtube.com/watch?v=8h4xp8OREjs&list=RD8h4xp8OREjs", groupId: "g1" });
+    await importer.playLink({ url: "https://youtu.be/aaaaaaaaaaa", groupId: "g1", mode: "end" });
+    expect(videoPlays).toEqual([
+      { videoId: "8h4xp8OREjs", groupId: "g1", mode: "replace" },
+      { videoId: "aaaaaaaaaaa", groupId: "g1", mode: "end" }
+    ]);
+    expect(downloads).toEqual([]);
+
+    await expect(importer.playLink({ url: "https://www.youtube.com/playlist?list=PLxyz", groupId: "g1" })).rejects.toMatchObject({ status: 400 });
+    await expect(importer.playLink({ url: "https://youtu.be/aaaaaaaaaaa" })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("previews a video with YouTube's names, and what a too-long one is saved as", async () => {
+    const song = { song_id: "aaaaaaaaaaa", name: "Ripple", artists: ["Grateful Dead"], duration: 250 };
+    const { importer } = setup([song, PADDED]);
+    // Not paired yet: only what the link itself says.
+    expect(await importer.preview("https://www.youtube.com/watch?v=aaaaaaaaaaa")).toEqual({ kind: "video", videoId: "aaaaaaaaaaa" });
+    await importer.pair("123456");
+
+    expect(await importer.preview("https://www.youtube.com/watch?v=aaaaaaaaaaa")).toEqual({ kind: "video", videoId: "aaaaaaaaaaa", title: "Ripple", artist: "Grateful Dead", durationSeconds: 250 });
+    expect((await importer.preview("https://www.youtube.com/watch?v=8h4xp8OREjs")).shortenedTo).toEqual({ title: "8h4xp8OREjs" });
+    expect(await importer.preview("https://www.youtube.com/playlist?list=PLxyz")).toEqual({ kind: "playlist", videoId: undefined });
+  });
+
+  it("still previews the link when Downtify can't look it up", async () => {
+    const { importer } = setup([], { resolveFails: true });
+    await importer.pair("123456");
+    expect(await importer.preview("https://youtu.be/aaaaaaaaaaa")).toEqual({ kind: "video", videoId: "aaaaaaaaaaa" });
   });
 
   it("turns away links that aren't YouTube, and stays hidden without a Downtify address", async () => {

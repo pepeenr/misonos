@@ -1,7 +1,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { DowntifyClient, DowntifyError } from "../src/downtify.js";
+import { DowntifyClient, DowntifyError, downloadBody } from "../src/downtify.js";
 
 interface Seen {
   method?: string;
@@ -58,6 +58,32 @@ describe("DowntifyClient", () => {
     expect(query.get("url")).toBe("https://music.youtube.com/watch?v=aaaaaaaaaaa");
     expect(query.get("client_id")).toBe("misonos");
     expect(JSON.parse(request.body)).toEqual({ youtube_id: "aaaaaaaaaaa" });
+  });
+
+  it("sends a named download as the song itself, still pinned to the video", async () => {
+    const fake = await fakeDowntify(() => ({ status: 200, body: JSON.stringify("jazzhousestudio/unknown/jazzhousestudio - Tired.opus") }));
+    const client = new DowntifyClient({ url: fake.url }, "dtfy_1_secret");
+    const song = { song_id: "8h4xp8OREjs", name: "ㅤㅤㅤ", artists: ["ㅤꞋꞌ"], album_artist: "ㅤꞋꞌ", duration: 3540, cover_url: "https://i.ytimg.com/vi/8h4xp8OREjs/hq.jpg", source: "youtube" };
+
+    await client.download(song, { artist: "jazzhousestudio", title: "Tired" });
+
+    expect(JSON.parse(fake.seen[0].body)).toEqual({
+      ...song,
+      source: "text_search",
+      youtube_id: "8h4xp8OREjs",
+      name: "Tired",
+      artists: ["jazzhousestudio"],
+      album_artist: "jazzhousestudio"
+    });
+  });
+
+  it("keeps YouTube's artist when only a title is given", () => {
+    const body = downloadBody({ song_id: "aaaaaaaaaaa", name: "Long", artists: ["Channel"] }, "aaaaaaaaaaa", { title: "Short" });
+    expect(body).toMatchObject({ name: "Short", artists: ["Channel"], youtube_id: "aaaaaaaaaaa" });
+    // What goes over the wire: no album_artist, so Downtify files it as before.
+    expect(JSON.parse(JSON.stringify(body))).not.toHaveProperty("album_artist");
+    expect(downloadBody({ name: "x" }, "aaaaaaaaaaa", { artist: " ", title: "" })).toEqual({ youtube_id: "aaaaaaaaaaa" });
+    expect(() => downloadBody({ name: "x" }, undefined, { title: "y" })).toThrow(DowntifyError);
   });
 
   it("resolves a link to a list of songs, one or many", async () => {

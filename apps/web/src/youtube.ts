@@ -25,6 +25,38 @@ export function youtubeLinkKind(text: string): "video" | "playlist" | "mix" {
   return list.startsWith("RD") && !list.startsWith("RDCLAK5uy_") ? "mix" : "playlist";
 }
 
+/**
+ * The video a link points at, as the bridge reads it (youtubeImport.ts videoIdOf):
+ * watch?v=, youtu.be/, /shorts/, /live/, or the song a Mix was started from. A plain
+ * playlist has none, so it can be downloaded but not played.
+ */
+export function linkVideoId(text: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return undefined;
+  }
+  const list = url.searchParams.get("list") ?? "";
+  const candidates = [
+    url.searchParams.get("v"),
+    /youtu\.be$/i.test(url.hostname) ? url.pathname.slice(1) : undefined,
+    /^\/(shorts|live|embed)\/([^/]+)/.exec(url.pathname)?.[2],
+    list.startsWith("RD") && !list.startsWith("RDCLAK5uy_") ? list.slice(2) : undefined
+  ];
+  return candidates.find((candidate): candidate is string => Boolean(candidate && /^[A-Za-z0-9_-]{11}$/.test(candidate)));
+}
+
+// Characters that print as nothing (Hangul fillers, the blank Braille cell, zero-width
+// spaces): uploads use them for "blank" names, which then show as a wide gap.
+const INVISIBLE = /[\u115F\u1160\u3164\uFFA0\u2800\u200B-\u200D\u2060\uFEFF]/gu;
+
+/** A YouTube name as it can be shown: without the characters that print as nothing. */
+export function visibleName(name: string | undefined): string | undefined {
+  const shown = name?.replace(INVISIBLE, "").replace(/\s+/g, " ").trim();
+  return shown || undefined;
+}
+
 /** What Enter will do with a pasted link. */
 export function describeLink(text: string, options: { play: boolean; playlist: string; mixSongs: number }): string {
   const kind = youtubeLinkKind(text);

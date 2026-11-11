@@ -407,6 +407,108 @@ button {
   color: #ff6b6b;
 }
 
+/* A pasted YouTube link: play it or download it (YouTubeLinkPanel); a download of one
+   video can take an artist and title of your own. */
+.youtube-link-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.youtube-link-panel .youtube-import-line {
+  margin: 0;
+}
+
+.youtube-link-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.youtube-link-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid rgba(242, 240, 232, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.youtube-link-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #aeb4ad;
+  cursor: pointer;
+}
+
+.youtube-link-toggle button[aria-pressed="true"] {
+  background: rgba(145, 211, 196, 0.22);
+  color: #91d3c4;
+}
+
+.youtube-link-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid rgba(145, 211, 196, 0.6);
+  border-radius: 8px;
+  background: rgba(145, 211, 196, 0.16);
+  color: #f2f0e8;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.youtube-link-go:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.youtube-link-names {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 10px;
+}
+
+.youtube-link-names label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.youtube-link-names label span {
+  color: #aeb4ad;
+  font-size: 0.8rem;
+}
+
+.youtube-link-names input {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgba(242, 240, 232, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f0e8;
+  font: inherit;
+}
+
+.youtube-link-names input::placeholder {
+  color: rgba(174, 180, 173, 0.7);
+}
+
+@media (max-width: 640px) {
+  .youtube-link-names {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Phones: the source's icon alone (the box names the source); its menu keeps a usable width. */
 @media (max-width: 640px) {
   .main-search-form .source-picker {
