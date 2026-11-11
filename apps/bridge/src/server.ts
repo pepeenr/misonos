@@ -501,7 +501,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     if (request.method === "GET" && sourceBrowseMatch) {
       const sourceId = decodeURIComponent(sourceBrowseMatch[1]);
       const id = url.searchParams.get("id") ?? undefined;
-      return json(response, await service.browseSource(sourceId, id));
+      return json(response, await service.browseSource(sourceId, id, url.searchParams.get("profile") ?? undefined));
     }
 
     const sourceSearchMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/search$/);
@@ -510,7 +510,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       const query = url.searchParams.get("q") ?? "";
       const type = url.searchParams.get("type") ?? undefined;
       if (!query) return json(response, { error: "Missing q" }, 400);
-      return json(response, await service.searchSource(sourceId, query, type));
+      return json(response, await service.searchSource(sourceId, query, type, url.searchParams.get("profile") ?? undefined));
     }
 
     const sourceAuthStatusMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/auth\/status$/);
@@ -536,7 +536,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     if (request.method === "GET" && sourceAuthLoginMatch) {
       const redirectUri = url.searchParams.get("redirect_uri") ?? "";
       try {
-        const login = await service.sourceAuthLogin(decodeURIComponent(sourceAuthLoginMatch[1]), redirectUri);
+        const login = await service.sourceAuthLogin(decodeURIComponent(sourceAuthLoginMatch[1]), redirectUri, url.searchParams.get("profile") ?? undefined);
         return redirect(response, login.url);
       } catch (error) {
         return authPage(response, "Couldn't start the sign-in", sourceErrorMessage(error));
@@ -547,7 +547,8 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     if (request.method === "GET" && sourceAuthCallbackMatch) {
       try {
         await service.sourceAuthCallback(decodeURIComponent(sourceAuthCallbackMatch[1]), url.searchParams);
-        return redirect(response, "/");
+        // Back to Settings, where the sign-in started.
+        return redirect(response, "/#settings");
       } catch (error) {
         return authPage(response, "Sign-in failed", sourceErrorMessage(error));
       }
@@ -555,7 +556,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
 
     const sourceAuthLogoutMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/auth\/logout$/);
     if (request.method === "POST" && sourceAuthLogoutMatch) {
-      return json(response, await service.sourceAuthLogout(decodeURIComponent(sourceAuthLogoutMatch[1])));
+      return json(response, await service.sourceAuthLogout(decodeURIComponent(sourceAuthLogoutMatch[1]), url.searchParams.get("profile") ?? undefined));
     }
 
     if (request.method === "GET" && url.pathname === "/api/spotify/accounts") {

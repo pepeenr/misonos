@@ -111,7 +111,56 @@ describe("spotify-smapi server", () => {
       expect.objectContaining({ kind: "section", title: expect.stringMatching(/Connect Spotify/) })
     ]);
     expect((await get("/browse?id=me:playlists")).status).toBe(401);
-    expect((await get("/auth/status")).body).toEqual({ configured: true, signedIn: false, redirectUri: null });
+    expect((await get("/auth/status")).body).toEqual({ configured: true, signedIn: false, profiles: {}, redirectUri: null });
+  });
+
+  it("gives a Sonos Spotify login its own account to browse, and falls back to the main one", async () => {
+    // Each sign-in's code names its user; the token carries it on to the Web API.
+    const perUser = (async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.host === "accounts.spotify.com") {
+        const code = new URLSearchParams(String(init?.body)).get("code") ?? "pepe";
+        return Response.json({ access_token: `access-${code}`, refresh_token: `refresh-${code}`, expires_in: 3600 });
+      }
+      const user = String(new Headers(init?.headers).get("Authorization")).replace("Bearer access-", "");
+      if (url.pathname === "/v1/me") return Response.json({ id: user, display_name: user === "mia" ? "Mia" : "Pepe" });
+      if (url.pathname === "/v1/me/playlists") {
+        return Response.json({ items: [{ id: `${user}-list`, name: `${user}'s list`, owner: { id: user } }], total: 1, next: null });
+      }
+      return Response.json({ error: { status: 404, message: "Not found" } }, { status: 404 });
+    }) as typeof fetch;
+    const config = loadConfig({
+      MISONOS_SPOTIFY_TOKEN_PATH: path.join(dir, "token.json"),
+      MISONOS_SPOTIFY_CLIENT_ID_PATH: path.join(dir, "client-id.json"),
+      MISONOS_SPOTIFY_CLIENT_ID: CLIENT_A
+    });
+    server = createServer(config, undefined, perUser);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const connect = async (code: string, profile?: string) => {
+      const login = await get(`/auth/login?redirect_uri=${encodeURIComponent(REDIRECT)}${profile ? `&profile=${profile}` : ""}`);
+      const authorize = new URL(String(login.body.url));
+      return { authorize, callback: await get(`/auth/callback?code=${code}&state=${authorize.searchParams.get("state")}`) };
+    };
+    const playlistNames = async (profile?: string) =>
+      ((await get(`/browse?id=me:playlists${profile ? `&profile=${profile}` : ""}`)).body.items as { title: string }[]).map((item) => item.title);
+
+    const main = await connect("pepe");
+    expect(main.authorize.searchParams.get("show_dialog")).toBeNull();
+    const mia = await connect("mia", "9:5");
+    // Spotify asks which account, since the browser is likely signed in as someone else.
+    expect(mia.authorize.searchParams.get("show_dialog")).toBe("true");
+    expect(mia.callback.body).toEqual({ signedIn: true, user: { id: "mia", displayName: "Mia" } });
+
+    expect(await playlistNames()).toEqual(["pepe's list"]);
+    expect(await playlistNames("9:5")).toEqual(["mia's list"]);
+    expect(await playlistNames("9:3")).toEqual(["pepe's list"]); // no account of its own
+    expect((await get("/auth/status")).body).toMatchObject({ signedIn: true, user: { id: "pepe" }, profiles: { "9:5": { id: "mia", displayName: "Mia" } } });
+    await expect(readFile(path.join(dir, "token.9-5.json"), "utf8")).resolves.toContain("refresh-mia");
+
+    await post("/auth/logout?profile=9:5");
+    expect((await get("/auth/status")).body.profiles).toEqual({});
+    expect(await playlistNames("9:5")).toEqual(["pepe's list"]);
   });
 
   it("signs in through login and callback, then serves the library", async () => {

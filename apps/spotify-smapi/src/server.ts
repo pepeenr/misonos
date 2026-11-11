@@ -1,4 +1,6 @@
+import { readdir } from "node:fs/promises";
 import http from "node:http";
+import path from "node:path";
 import type { SourceBrowseItem, SpotifyClientStatus } from "@misonos/sonos-protocol";
 import { SpotifyAuth, SpotifyAuthError } from "./auth.js";
 import { SpotifyBrowser } from "./browse.js";
@@ -14,16 +16,58 @@ const SIGN_IN_NOTICE: SourceBrowseItem = {
   kind: "section"
 };
 
-interface Connection {
-  clientId: string;
+// One signed-in Spotify account: its tokens, and the API and browse tree on them.
+interface Account {
   auth: SpotifyAuth;
   api: SpotifyClient;
   browser: SpotifyBrowser;
 }
 
+interface Connection {
+  clientId: string;
+  /** The account connected under Settings → Spotify → "Your Spotify account". */
+  main: Account;
+  /** Accounts connected per Sonos Spotify login ("sid:sn"), so Mia's login browses Mia's library. */
+  profiles: Map<string, Account>;
+}
+
+// A Sonos Spotify login, as "sid:sn" ("9:5").
+const PROFILE_KEY = /^(\d{1,4}):(\d{1,4})$/;
+
+export function profileKey(raw: string | null | undefined): string | undefined {
+  return raw && PROFILE_KEY.test(raw) ? raw : undefined;
+}
+
+/** Where a login's own sign-in is kept: next to the main one, "spotify-token.9-5.json". */
+export function profileTokenPath(tokenPath: string, key: string): string {
+  const ext = path.extname(tokenPath);
+  return path.join(path.dirname(tokenPath), `${path.basename(tokenPath, ext)}.${key.replace(":", "-")}${ext}`);
+}
+
+/** The logins with a sign-in of their own, read off the token files. */
+async function savedProfileKeys(tokenPath: string): Promise<string[]> {
+  const ext = path.extname(tokenPath);
+  const base = path.basename(tokenPath, ext);
+  const pattern = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.(\\d{1,4})-(\\d{1,4})${ext.replace(".", "\\.")}$`);
+  try {
+    return (await readdir(path.dirname(tokenPath)))
+      .map((name) => pattern.exec(name))
+      .filter((match): match is RegExpExecArray => !!match)
+      .map((match) => `${match[1]}:${match[2]}`);
+  } catch {
+    return [];
+  }
+}
+
 export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetchImpl: typeof fetch = fetch): http.Server {
   let savedClientId = saved?.clientId;
   let connection: Connection | undefined;
+
+  const account = (clientId: string, tokenPath: string): Account => {
+    const auth = new SpotifyAuth(clientId, tokenPath, fetchImpl);
+    const api = new SpotifyClient(auth, fetchImpl);
+    return { auth, api, browser: new SpotifyBrowser(api) };
+  };
 
   // A Client ID saved from Settings wins; the env var is the fallback; with neither
   // the source stays hidden.
@@ -33,11 +77,47 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
       connection = undefined;
       return;
     }
-    const auth = new SpotifyAuth(clientId, config.tokenPath, fetchImpl);
-    const api = new SpotifyClient(auth, fetchImpl);
-    connection = { clientId, auth, api, browser: new SpotifyBrowser(api) };
+    connection = { clientId, main: account(clientId, config.tokenPath), profiles: new Map() };
   };
   connect();
+
+  /** A login's own account, made on first use (its token file may already exist). */
+  const profileAccount = (active: Connection, key: string): Account => {
+    let found = active.profiles.get(key);
+    if (!found) {
+      found = account(active.clientId, profileTokenPath(config.tokenPath, key));
+      active.profiles.set(key, found);
+    }
+    return found;
+  };
+
+  /** The account to browse with for a login: its own sign-in, else the main one. */
+  const browsingAccount = async (active: Connection, key: string | undefined): Promise<Account> => {
+    if (key) {
+      const own = profileAccount(active, key);
+      if ((await own.auth.status()).signedIn) return own;
+    }
+    return active.main;
+  };
+
+  /** Any signed-in account, for lookups any account can make (a track, its artist). */
+  const anyAccount = async (active: Connection): Promise<Account> => {
+    if ((await active.main.auth.status()).signedIn) return active.main;
+    for (const key of await savedProfileKeys(config.tokenPath)) {
+      const own = profileAccount(active, key);
+      if ((await own.auth.status()).signedIn) return own;
+    }
+    return active.main;
+  };
+
+  const profileStatuses = async (active: Connection) => {
+    const profiles: Record<string, { id: string; displayName?: string }> = {};
+    for (const key of await savedProfileKeys(config.tokenPath)) {
+      const status = await profileAccount(active, key).auth.status();
+      if (status.signedIn && status.user) profiles[key] = status.user;
+    }
+    return profiles;
+  };
 
   const clientStatus = (): SpotifyClientStatus => ({
     source: savedClientId ? "saved" : config.clientId ? "env" : "none",
@@ -50,7 +130,10 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
     const before = connection;
     savedClientId = next;
     if ((savedClientId ?? config.clientId) === before?.clientId) return;
-    await before?.auth.signOut();
+    if (before) {
+      await before.main.auth.signOut();
+      for (const key of await savedProfileKeys(config.tokenPath)) await profileAccount(before, key).auth.signOut();
+    }
     connect();
   };
 
@@ -86,7 +169,12 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
       // Answered even unconfigured, so Settings can explain the setup.
       if (request.method === "GET" && url.pathname === "/auth/status") {
         if (!active) return sendJson(response, 200, { configured: false, signedIn: false });
-        return sendJson(response, 200, { configured: true, ...(await active.auth.status()), redirectUri: config.redirectUri ?? null });
+        return sendJson(response, 200, {
+          configured: true,
+          ...(await active.main.auth.status()),
+          profiles: await profileStatuses(active),
+          redirectUri: config.redirectUri ?? null
+        });
       }
       // Unconfigured, the bridge's /info probe fails and the source stays hidden.
       if (!active) {
@@ -94,7 +182,8 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
           error: "Spotify is not configured: add your Spotify app's Client ID under Settings → Spotify, or set MISONOS_SPOTIFY_CLIENT_ID"
         });
       }
-      const { auth, api, browser } = active;
+      // A Sonos Spotify login ("9:5"): sign-in, sign-out, browse and search act on its own account.
+      const profile = profileKey(url.searchParams.get("profile"));
       if (request.method === "GET" && url.pathname === "/info") {
         return sendJson(response, 200, {
           id: "spotify",
@@ -108,7 +197,10 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
       if (request.method === "GET" && url.pathname === "/auth/login") {
         const target = config.redirectUri ?? redirectUri(url.searchParams.get("redirect_uri"));
         if (!target) return sendJson(response, 400, { error: "Missing or invalid redirect_uri" });
-        return sendJson(response, 200, { url: auth.beginLogin(target) });
+        // Connecting a login's own account asks which account, since this browser is
+        // likely signed in to Spotify as someone else already.
+        const signingIn = profile ? profileAccount(active, profile) : active.main;
+        return sendJson(response, 200, { url: signingIn.auth.beginLogin(target, { chooseAccount: Boolean(profile) }) });
       }
       if (request.method === "GET" && url.pathname === "/auth/callback") {
         const denied = url.searchParams.get("error");
@@ -116,17 +208,20 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
         const code = url.searchParams.get("code");
         const state = url.searchParams.get("state");
         if (!code || !state) return sendJson(response, 400, { error: "Missing code or state" });
-        await auth.completeLogin(code, state);
-        const profile = await api.get<SpotifyProfile>("/me");
-        await auth.setUser({ id: profile.id, displayName: profile.display_name ?? undefined });
-        return sendJson(response, 200, await auth.status());
+        // The sign-in comes back to whichever account started it.
+        const signingIn = [active.main, ...active.profiles.values()].find((candidate) => candidate.auth.hasPending(state)) ?? active.main;
+        await signingIn.auth.completeLogin(code, state);
+        const me = await signingIn.api.get<SpotifyProfile>("/me");
+        await signingIn.auth.setUser({ id: me.id, displayName: me.display_name ?? undefined });
+        return sendJson(response, 200, await signingIn.auth.status());
       }
       if (request.method === "POST" && url.pathname === "/auth/logout") {
-        await auth.signOut();
+        await (profile ? profileAccount(active, profile) : active.main).auth.signOut();
         return sendJson(response, 200, { signedIn: false });
       }
       if (request.method === "GET" && url.pathname === "/browse") {
         const id = url.searchParams.get("id") ?? "root";
+        const { auth, browser } = await browsingAccount(active, profile);
         if (!(await auth.status()).signedIn) {
           if (id === "root") return sendJson(response, 200, { id, total: 1, items: [SIGN_IN_NOTICE] });
           return sendJson(response, 401, { error: "Not signed in to Spotify" });
@@ -136,6 +231,7 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
       if (request.method === "GET" && url.pathname === "/search") {
         const query = (url.searchParams.get("q") ?? "").trim();
         if (!query) return sendJson(response, 400, { error: "Missing q" });
+        const { auth, browser } = await browsingAccount(active, profile);
         if (!(await auth.status()).signedIn) {
           return sendJson(response, 200, { id: `search:${query}`, total: 1, items: [SIGN_IN_NOTICE] });
         }
@@ -144,12 +240,12 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
       if (request.method === "GET" && url.pathname === "/track-artist") {
         const id = url.searchParams.get("id");
         if (!id) return sendJson(response, 400, { error: "Missing id" });
-        return sendJson(response, 200, await browser.trackArtist(id));
+        return sendJson(response, 200, await (await anyAccount(active)).browser.trackArtist(id));
       }
       if (request.method === "GET" && url.pathname === "/track") {
         const id = url.searchParams.get("id");
         if (!id) return sendJson(response, 400, { error: "Missing id" });
-        return sendJson(response, 200, await browser.track(id));
+        return sendJson(response, 200, await (await anyAccount(active)).browser.track(id));
       }
       sendJson(response, 404, { error: "Not found" });
     } catch (error) {

@@ -1438,7 +1438,13 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
   }, []);
   // Each Sonos Spotify login (Mia, Pepe) is a Spotify button of its own: it picks which
   // login what's played from Music goes to. Browsing is the same Spotify account either way.
-  const spotifyProfiles = useSpotifyProfiles(active && !!sources?.some((source) => source.id === "spotify"));
+  const spotifyProfiles = useSpotifyProfiles(!!sources?.some((source) => source.id === "spotify"), active);
+  // The Spotify login whose library Music shows: its own connected account, if it has one.
+  const browseProfile = sourceId === "spotify" ? spotifyProfiles.selectedKey : undefined;
+  // Wait for the logins before the first Spotify browse, so it doesn't show the wrong library first.
+  const browseReady = sourceId !== "spotify" || spotifyProfiles.loaded;
+  // Cached per login too: two logins' "Playlists" are different lists.
+  const browseKey = useCallback((id: string | undefined) => `${sourceId}:${browseProfile ? `${browseProfile}|` : ""}${id ?? "root"}`, [sourceId, browseProfile]);
   const spotifyVariants: SourceVariant[] = spotifyProfiles.profiles.map((profile) => ({
     key: profile.key,
     label: profile.label,
@@ -1638,14 +1644,14 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
     setStack([]); // search is a fresh context — drop the browse breadcrumb trail
     const type = supportsTypedSearch ? (overrideType ?? searchType) : undefined;
     try {
-      const next = await bridgeApi.searchSource(sourceId, query, type);
+      const next = await bridgeApi.searchSource(sourceId, query, type, browseProfile);
       setData(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
     } finally {
       setLoading(false);
     }
-  }, [sourceId, searchQuery, searchType, supportsTypedSearch]);
+  }, [sourceId, searchQuery, searchType, supportsTypedSearch, browseProfile]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery("");
@@ -1676,13 +1682,21 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
     })();
   }, [sourceId, persistSourceId, sourcesVersion]);
 
+  // Another login is another library: start it from the top.
+  const shownProfileRef = useRef(browseProfile);
   useEffect(() => {
-    if (!sourceId || searchActive) return;
+    const before = shownProfileRef.current;
+    shownProfileRef.current = browseProfile;
+    if (before && browseProfile && before !== browseProfile) setStack([]);
+  }, [browseProfile]);
+
+  useEffect(() => {
+    if (!sourceId || searchActive || !browseReady) return;
     // Ignore a stale in-flight response when the view changes again before it lands,
     // so a slow browse can't overwrite a newer one (e.g. navigating back to root).
     let cancelled = false;
     const id = stack.length > 0 ? stack[stack.length - 1].id : undefined;
-    const cacheKey = `${sourceId}:${id ?? "root"}`;
+    const cacheKey = browseKey(id);
     // Show cached results instantly on revisit; the refresh button evicts the key so
     // it refetches (e.g. to regenerate a Supermix). Browse results rarely change
     // moment-to-moment, so caching avoids a slow round-trip on every navigation.
@@ -1697,7 +1711,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
     setError("");
     void (async () => {
       try {
-        const next = await bridgeApi.browseSource(sourceId, id);
+        const next = await bridgeApi.browseSource(sourceId, id, browseProfile);
         if (cancelled) return;
         browseCache.current.set(cacheKey, next);
         setData(next);
@@ -1709,7 +1723,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
       }
     })();
     return () => { cancelled = true; };
-  }, [sourceId, stack, searchActive, refreshNonce]);
+  }, [sourceId, stack, searchActive, refreshNonce, browseReady, browseKey, browseProfile]);
 
   const drill = useCallback((item: { id: string; title: string }) => {
     setSearchActive(false);
@@ -1814,7 +1828,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
         // Queued whole in one call (Sonos expands a Spotify album or playlist itself).
         trackIds = [item.playId];
       } else {
-        const expansion = await bridgeApi.browseSource(sourceId, item.id);
+        const expansion = await bridgeApi.browseSource(sourceId, item.id, browseProfile);
         trackIds = expansion.items.filter((entry) => entry.kind === "playable").map((entry) => entry.id);
         if (trackIds.length === 0) {
           setStatus({ ok: false, message: `“${item.title}” has no playable tracks.` });
@@ -1829,7 +1843,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
     } finally {
       setPlaying(null);
     }
-  }, [sourceId, selectedGroupId, buildLocalTracks, localPlayer, sonosOnly, activeSource?.name]);
+  }, [sourceId, selectedGroupId, buildLocalTracks, localPlayer, sonosOnly, activeSource?.name, browseProfile]);
 
   if (sources && sources.length === 0) {
     return (
@@ -2000,7 +2014,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
             disabled={loading}
             onClick={() => {
               const id = stack.length > 0 ? stack[stack.length - 1].id : undefined;
-              browseCache.current.delete(`${sourceId}:${id ?? "root"}`);
+              browseCache.current.delete(browseKey(id));
               setRefreshNonce((nonce) => nonce + 1);
             }}
           >

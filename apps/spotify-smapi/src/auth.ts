@@ -68,8 +68,9 @@ export class SpotifyAuth {
     private readonly fetchImpl: typeof fetch = fetch
   ) {}
 
-  // The Spotify URL to send the browser to.
-  beginLogin(redirectUri: string): string {
+  // The Spotify URL to send the browser to. `chooseAccount` makes Spotify ask which
+  // account to use, rather than reuse the one this browser is signed in to.
+  beginLogin(redirectUri: string, options: { chooseAccount?: boolean } = {}): string {
     this.prune();
     const state = base64url(randomBytes(16));
     const verifier = base64url(randomBytes(48));
@@ -83,9 +84,16 @@ export class SpotifyAuth {
       redirect_uri: redirectUri,
       state,
       code_challenge_method: "S256",
-      code_challenge: challenge
+      code_challenge: challenge,
+      ...(options.chooseAccount ? { show_dialog: "true" } : {})
     }).toString();
     return url.toString();
+  }
+
+  // Whether a sign-in started here is waiting for this state to come back.
+  hasPending(state: string): boolean {
+    this.prune();
+    return this.pending.has(state);
   }
 
   async completeLogin(code: string, state: string): Promise<void> {
