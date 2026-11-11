@@ -13,11 +13,13 @@ interface LibraryViewProps {
   groups: SonosGroup[];
   selectedGroupId?: string;
   onSelectGroup: (groupId: string) => void;
+  /** Show a room picker of its own; otherwise the app's room menu picks where it plays. */
+  showGroupPicker?: boolean;
 }
 
 type OpenPlaylist = { playlist: Playlist; items: PlaylistItem[] };
 
-export function LibraryView({ groups, selectedGroupId, onSelectGroup }: LibraryViewProps) {
+export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupPicker = true }: LibraryViewProps) {
   const dialogs = useDialogs();
   const favs = useFavorites();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -304,7 +306,7 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup }: LibraryV
     setOpen({ playlist: open.playlist, items });
   };
 
-  const groupSelect = groupOptions.length > 0 ? (
+  const groupSelect = showGroupPicker && groupOptions.length > 0 ? (
     <div className="library-group">
       <span>Play to</span>
       <GroupDropdown
