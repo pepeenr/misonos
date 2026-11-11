@@ -188,6 +188,12 @@ export const bridgeApi = {
   clearSpotifyClient: () => request<SpotifyClientStatus>("/api/sources/spotify/config/clear", { method: "POST", body: "{}" }),
   spotifyLogout: () => request<{ signedIn: false }>("/api/sources/spotify/auth/logout", { method: "POST", body: "{}" }),
   spotifyAccounts: (refresh = false) => request<SpotifyAccountsView>(`/api/spotify/accounts${refresh ? "?refresh=1" : ""}`),
+  /** Play Spotify on another linked login, from now on and for what plays now. */
+  setSpotifyAccount: (groupId: string, account: { sid: number; sn: number }) =>
+    request<{ moved: number; nowPlaying: NowPlaying }>(`/api/groups/${encodeURIComponent(groupId)}/spotify-account`, { method: "POST", body: JSON.stringify(account) }, 60_000),
+  /** Spotify radio for the artist of the Spotify song playing now. */
+  startSpotifyRadio: (groupId: string) =>
+    request<{ artist: { id: string; name: string }; nowPlaying: NowPlaying }>(`/api/groups/${encodeURIComponent(groupId)}/spotify-radio`, { method: "POST", body: "{}" }, 30_000),
   sourceSubscriptions: (sourceId: string) =>
     request<{ ids: string[] }>(`/api/sources/${encodeURIComponent(sourceId)}/subscriptions`),
   pinSource: (sourceId: string, id: string, pinned: boolean) =>

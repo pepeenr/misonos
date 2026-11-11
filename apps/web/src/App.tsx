@@ -27,6 +27,8 @@ import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { SettingsCard, SettingsSection } from "./SettingsSection.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
 import { HistoryPanel } from "./HistoryPanel.js";
+import { SpotifyNowPlaying } from "./SpotifyNowPlaying.js";
+import { spotifyLoginOfUri } from "./spotifyLogins.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
 
@@ -1048,6 +1050,9 @@ export function App() {
             <p className="eyebrow">{localMode ? "ON THIS DEVICE" : effectiveNowPlaying?.state ?? "UNKNOWN"}</p>
             <h2>{effectiveNowPlaying?.title ?? "Nothing selected"}</h2>
             <p>{[effectiveNowPlaying?.artist, effectiveNowPlaying?.album].filter(Boolean).join(" - ")}</p>
+            {!localMode && selectedGroup && nowPlaying && spotifyLoginOfUri(nowPlaying.uri) ? (
+              <SpotifyNowPlaying groupId={selectedGroup.id} nowPlaying={nowPlaying} onPlayed={onPlaylistPlayed} />
+            ) : null}
             {/* Live streams (e.g. TuneIn radio) report no duration and can't be
                 seeked, so the scrub bar would be meaningless — hide it entirely. */}
             {effectiveProgress.durationSeconds > 0 && (

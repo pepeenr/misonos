@@ -1,4 +1,4 @@
-import { attrText, firstDidlItem, parseDidlItems, selfClosingTags, type Alarm, type AlarmInput, type AlarmProgram, type AlarmRecurrence, type BridgeSnapshot, type EqPayload, type EqState, type NowPlaying, type PlaybackState, type QueueItem, type RepeatMode, type SonosGroup, type SonosZone, type TransportAction, type VolumePayload, type VolumeState } from "@misonos/sonos-protocol";
+import { allTagBlocks, attrText, firstDidlItem, parseDidlItems, selfClosingTags, tagText, type Alarm, type AlarmInput, type AlarmProgram, type AlarmRecurrence, type BridgeSnapshot, type EqPayload, type EqState, type NowPlaying, type PlaybackState, type QueueItem, type RepeatMode, type SonosGroup, type SonosZone, type TransportAction, type VolumePayload, type VolumeState } from "@misonos/sonos-protocol";
 import { loadConfig, type BridgeConfig } from "./config.js";
 import { discoverSsdp } from "./ssdp.js";
 import { callSoap, SonosSoapError, type ServiceType } from "./sonosSoap.js";
@@ -20,12 +20,19 @@ import {
 } from "./sources.js";
 import {
   defaultSpotifyToken,
+  isSonosSpotifyUri,
   isSpotifyUri,
   mergeSpotifyAccounts,
+  queuedItemOnAccount,
+  spotifyAccountOfUri,
   spotifyAccountsInDidl,
+  spotifyArtistRadioItem,
   spotifyQueueItem,
   spotifyTrackFromSonosUri,
   SPOTIFY_SOURCE_ID,
+  withSpotifyAccount,
+  withSpotifyToken,
+  type QueuedItem,
   type SonosSpotifyAccount
 } from "./spotifySonos.js";
 import {
@@ -97,6 +104,9 @@ export interface SmapiAccountScanResult {
 const SMAPI_MISS_COOLDOWN_MS = 5 * 60 * 1000;
 // Queueing a whole Spotify playlist makes the speaker resolve it before answering.
 const ENQUEUE_TIMEOUT_MS = 20000;
+// Sonos queues hold at most 1000 tracks, and AddMultipleURIsToQueue takes 16 at a time.
+const QUEUE_MAX = 1000;
+const ADD_MULTIPLE_MAX = 16;
 // Favorites and queues rarely change which Spotify accounts they use.
 const SPOTIFY_ACCOUNTS_TTL_MS = 5 * 60 * 1000;
 
@@ -1043,6 +1053,152 @@ export class SonosService {
     return this.nowPlaying(groupId);
   }
 
+  /**
+   * Move what the group plays from Spotify onto another Spotify login: Spotify radio is
+   * tuned again on it, and every Spotify song in the queue is queued again on it, from
+   * the same song and second. Other songs in the queue stay as they are. Returns how
+   * many entries moved (0 when nothing played from Spotify, or it was on that login).
+   */
+  async moveSpotifyToAccount(groupId: string, account: Pick<SonosSpotifyAccount, "sid" | "sn" | "token">): Promise<{ moved: number; nowPlaying: NowPlaying }> {
+    const group = await this.requireGroup(groupId);
+    const coordinator = await this.requireZone(group.coordinatorId);
+    const ip = coordinator.ipAddress;
+    const moved = await this.guardSoap(coordinator.uuid, async () => {
+      const [media, position, transport] = await Promise.all([
+        callSoap(ip, "AVTransport", "GetMediaInfo", { InstanceID: 0 }),
+        callSoap(ip, "AVTransport", "GetPositionInfo", { InstanceID: 0 }),
+        callSoap(ip, "AVTransport", "GetTransportInfo", { InstanceID: 0 })
+      ]);
+      const playing = normalizePlaybackState(transport.CurrentTransportState) === "PLAYING";
+      const current = media.CurrentURI ?? "";
+
+      // Spotify radio, which the transport plays directly: tune it again.
+      if (isSonosSpotifyUri(current)) {
+        const on = spotifyAccountOfUri(current);
+        if (on?.sid === account.sid && on.sn === account.sn) return 0;
+        await callSoap(ip, "AVTransport", "SetAVTransportURI", {
+          InstanceID: 0,
+          CurrentURI: withSpotifyAccount(current, account),
+          CurrentURIMetaData: withSpotifyToken(media.CurrentURIMetaData ?? "", account.token)
+        });
+        if (playing) await callSoap(ip, "AVTransport", "Play", { InstanceID: 0, Speed: 1 });
+        return 1;
+      }
+      // Spotify Connect, the TV, line-in: not MiSonos's to move.
+      if (programOfUri(current) !== "queue") return 0;
+
+      const items = await this.queuedItems(ip);
+      const entries = items.map((item) => queuedItemOnAccount(item, account));
+      const toMove = items.filter((item, index) => {
+        if (!entries[index].spotify) return false;
+        const on = spotifyAccountOfUri(item.uri);
+        return !(on?.sid === account.sid && on.sn === account.sn);
+      }).length;
+      if (toMove === 0) return 0;
+
+      const count = items.length;
+      const track = Math.min(Math.max(1, numericPosition(position.Track) ?? 1), count);
+      const at = usableSeekTime(position.RelTime);
+      const seekTime = async () => {
+        if (at) await callSoap(ip, "AVTransport", "Seek", { InstanceID: 0, Unit: "REL_TIME", Target: at }).catch(() => undefined);
+      };
+      if (count * 2 <= QUEUE_MAX) {
+        // Without a gap: queue the moved copy after the queue, go on from the same song
+        // in it, then drop the old entries in front of it.
+        await this.addQueueEntries(ip, entries);
+        await callSoap(ip, "AVTransport", "Seek", { InstanceID: 0, Unit: "TRACK_NR", Target: String(count + track) });
+        await seekTime();
+        if (playing) await callSoap(ip, "AVTransport", "Play", { InstanceID: 0, Speed: 1 });
+        await callSoap(ip, "AVTransport", "RemoveTrackRangeFromQueue", { InstanceID: 0, UpdateID: 0, StartingIndex: 1, NumberOfTracks: count });
+      } else {
+        await callSoap(ip, "AVTransport", "RemoveAllTracksFromQueue", { InstanceID: 0 });
+        await this.addQueueEntries(ip, entries);
+        await callSoap(ip, "AVTransport", "SetAVTransportURI", { InstanceID: 0, CurrentURI: `x-rincon-queue:${coordinator.uuid}#0`, CurrentURIMetaData: "" });
+        await callSoap(ip, "AVTransport", "Seek", { InstanceID: 0, Unit: "TRACK_NR", Target: String(track) });
+        await seekTime();
+        if (playing) await callSoap(ip, "AVTransport", "Play", { InstanceID: 0, Speed: 1 });
+      }
+      return toMove;
+    });
+    return { moved, nowPlaying: await this.nowPlayingSettled(groupId) };
+  }
+
+  /** Spotify radio for an artist on the group, through a Spotify login. The queue stays as it is. */
+  async playSpotifyArtistRadio(groupId: string, artist: { id: string; name: string }, account?: Pick<SonosSpotifyAccount, "sid" | "sn" | "token">): Promise<NowPlaying> {
+    const group = await this.requireGroup(groupId);
+    const coordinator = await this.requireZone(group.coordinatorId);
+    const login = account ?? await this.spotifyPlaybackAccount();
+    const { uri, metadata } = spotifyArtistRadioItem(artist, login);
+    await this.guardSoap(coordinator.uuid, async () => {
+      await callSoap(coordinator.ipAddress, "AVTransport", "SetAVTransportURI", { InstanceID: 0, CurrentURI: uri, CurrentURIMetaData: metadata });
+      await callSoap(coordinator.ipAddress, "AVTransport", "Play", { InstanceID: 0, Speed: 1 });
+    });
+    return this.nowPlayingSettled(groupId);
+  }
+
+  /** The household's Spotify login a URI plays on, with its token. */
+  async spotifyAccountForUri(uri: string | undefined): Promise<Pick<SonosSpotifyAccount, "sid" | "sn" | "token"> | undefined> {
+    const on = spotifyAccountOfUri(uri);
+    if (!on) return undefined;
+    const known = (await this.spotifyAccounts().catch(() => [])).find((account) => account.sid === on.sid && account.sn === on.sn);
+    return known ? { sid: known.sid, sn: known.sn, token: known.token } : undefined;
+  }
+
+  // The whole queue as ContentDirectory lists it, page by page.
+  private async queuedItems(ip: string): Promise<QueuedItem[]> {
+    const items: QueuedItem[] = [];
+    for (let start = 0; start < QUEUE_MAX; start += 100) {
+      const response = await callSoap(ip, "ContentDirectory", "Browse", {
+        ObjectID: "Q:0",
+        BrowseFlag: "BrowseDirectChildren",
+        Filter: "*",
+        StartingIndex: start,
+        RequestedCount: 100,
+        SortCriteria: ""
+      });
+      const blocks = allTagBlocks(response.Result ?? "", "item");
+      const parsed = parseDidlItems(response.Result, `http://${ip}:1400`);
+      blocks.forEach((xml, index) => {
+        const item = parsed[index];
+        items.push({ uri: item?.uri ?? tagText(xml, "res") ?? "", xml, title: item?.title ?? "", artist: item?.artist, album: item?.album, albumArtUri: item?.albumArtUri });
+      });
+      const total = Number.parseInt(response.TotalMatches ?? "0", 10);
+      if (blocks.length === 0 || items.length >= total) break;
+    }
+    return items;
+  }
+
+  // Append entries to the queue, 16 per call; one by one if the speaker won't take several.
+  private async addQueueEntries(ip: string, entries: { uri: string; metadata: string }[]): Promise<void> {
+    for (let start = 0; start < entries.length; start += ADD_MULTIPLE_MAX) {
+      const chunk = entries.slice(start, start + ADD_MULTIPLE_MAX);
+      try {
+        await callSoap(ip, "AVTransport", "AddMultipleURIsToQueue", {
+          InstanceID: 0,
+          UpdateID: 0,
+          NumberOfURIs: chunk.length,
+          EnqueuedURIs: chunk.map((entry) => entry.uri).join(" "),
+          EnqueuedURIsMetaData: chunk.map((entry) => entry.metadata).join(" "),
+          ContainerURI: "",
+          ContainerMetaData: "",
+          DesiredFirstTrackNumberEnqueued: 0,
+          EnqueueAsNext: 0
+        }, ENQUEUE_TIMEOUT_MS);
+      } catch (error) {
+        if (!(error instanceof SonosSoapError)) throw error;
+        for (const entry of chunk) {
+          await callSoap(ip, "AVTransport", "AddURIToQueue", {
+            InstanceID: 0,
+            EnqueuedURI: entry.uri,
+            EnqueuedURIMetaData: entry.metadata,
+            DesiredFirstTrackNumberEnqueued: 0,
+            EnqueueAsNext: 0
+          }, ENQUEUE_TIMEOUT_MS);
+        }
+      }
+    }
+  }
+
   /** Parse the current queue back into source track refs (for "save queue as playlist"). */
   async queueTrackRefs(groupId: string): Promise<{ items: Array<{ sourceId: string; trackId: string; title: string; artist: string | null; album: string | null }>; skipped: number }> {
     const queue = await this.queue(groupId);
@@ -1381,6 +1537,12 @@ function cleanTrackTitle(value: string | undefined): string {
   if (!value) return "Nothing playing";
   if (/^(?:x-sonos-http|x-sonosapi-stream|x-rincon|https?):/i.test(value)) return "Unknown track";
   return value;
+}
+
+// A REL_TIME worth seeking back to: "0:03:12", not the start or "NOT_IMPLEMENTED".
+function usableSeekTime(value: string | undefined): string | undefined {
+  if (!value || !/^\d+:\d{2}:\d{2}$/.test(value)) return undefined;
+  return /^0+:00:0[0-2]$/.test(value) ? undefined : value;
 }
 
 function normalizePlaybackState(value: string | undefined): PlaybackState {

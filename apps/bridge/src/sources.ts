@@ -140,6 +140,14 @@ export async function fetchTrack(sourceId: string, id: string): Promise<SourceTr
   return fetchJson<SourceTrackInfo>(target);
 }
 
+/** The main artist of a Spotify track, from the Spotify source (needs its sign-in). */
+export async function fetchSpotifyTrackArtist(trackUri: string): Promise<{ id: string; name: string }> {
+  const config = requireConfig("spotify");
+  const target = new URL("/track-artist", config.baseUrl);
+  target.searchParams.set("id", trackUri);
+  return fetchJson<{ id: string; name: string }>(target);
+}
+
 export async function searchSource(sourceId: string, query: string, type?: string): Promise<SourceBrowseResponse> {
   const config = requireConfig(sourceId);
   const target = new URL("/search", config.baseUrl);

@@ -141,6 +141,11 @@ export function createServer(config: SpotifyConfig, saved?: SavedClientId, fetch
         }
         return sendJson(response, 200, await browser.search(query));
       }
+      if (request.method === "GET" && url.pathname === "/track-artist") {
+        const id = url.searchParams.get("id");
+        if (!id) return sendJson(response, 400, { error: "Missing id" });
+        return sendJson(response, 200, await browser.trackArtist(id));
+      }
       if (request.method === "GET" && url.pathname === "/track") {
         const id = url.searchParams.get("id");
         if (!id) return sendJson(response, 400, { error: "Missing id" });

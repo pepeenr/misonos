@@ -1800,6 +1800,93 @@ h2 {
   to { opacity: 0.45; }
 }
 
+/* Under the song while Spotify plays: the Spotify login it plays on, and artist radio. */
+.spotify-now-playing {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+
+.spotify-now-playing-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.spotify-login {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #aeb4ad;
+}
+
+.spotify-login select {
+  border: 1px solid rgba(29, 185, 84, 0.45);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: #f2f0e8;
+  background: rgba(29, 185, 84, 0.12);
+  font: inherit;
+  cursor: pointer;
+}
+
+.spotify-login select:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.spotify-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(242, 240, 232, 0.16);
+  border-radius: 999px;
+  padding: 4px 12px;
+  color: #d7d2c4;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.spotify-radio:hover:not(:disabled) {
+  border-color: rgba(145, 211, 196, 0.5);
+  color: #91d3c4;
+}
+
+.spotify-radio:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* Settings → Spotify: a login, and the name the main screen shows for it. */
+.spotify-login-setting {
+  align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.spotify-login-name {
+  width: 11rem;
+  max-width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(242, 240, 232, 0.18);
+  border-radius: 6px;
+  color: #f2f0e8;
+  padding: 6px 10px;
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+
+.spotify-now-playing-note {
+  font-size: 0.8rem;
+  color: #8a8e88;
+}
+
 /* The main screen's History: songs every room played, in days, newest first. The
    whole list scrolls inside the card, like the queue; the day lists don't scroll on their own. */
 .queue-panel.history-panel {

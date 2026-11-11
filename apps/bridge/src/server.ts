@@ -4,6 +4,7 @@ import type { AlarmInput, BridgeEvent, EqPayload, EqPreset, Favorite, NowPlaying
 import type { BridgeConfig } from "./config.js";
 import { PlayHistoryRecorder } from "./playHistory.js";
 import { QueueReturn } from "./queueReturn.js";
+import { spotifyTrackFromSonosUri } from "./spotifySonos.js";
 import { pickSelectedGroup, SELECTED_GROUP_PREF, stepVolume } from "./selectedRoom.js";
 import { SonosEventManager } from "./sonosEvents.js";
 import { SonosService } from "./sonosService.js";
@@ -12,11 +13,13 @@ import { proxyStream } from "./streamProxy.js";
 import { subscribeMeter } from "./meter.js";
 import { serveArt } from "./artProxy.js";
 import { deleteSourceIcon, listSourceIcons, saveSourceIcon, serveSourceIcon } from "./sourceIcons.js";
-import { appendToSourcePlaylist, isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled, sourceClearConfig, sourceConfig, sourceSaveConfig, SourceRequestError } from "./sources.js";
+import { appendToSourcePlaylist, fetchSpotifyTrackArtist, isKnownSource, listSourceSettings, readDisabledSources, setSourceEnabled, sourceClearConfig, sourceConfig, sourceSaveConfig, SourceRequestError } from "./sources.js";
 import { YouTubeImporter, YouTubeImportError } from "./youtubeImport.js";
 import path from "node:path";
 
 const SPOTIFY_ACCOUNT_PREF = "spotifySonosAccount";
+// Names the household gave its Sonos Spotify logins ("Mia", "Pepe"), keyed "sid:sn".
+const SPOTIFY_ACCOUNT_NAMES_PREF = "spotifyAccountNames";
 // The volume cap set in Settings (0–100), shared with the web app's sliders.
 const MAX_VOLUME_PREF = "maxVolume";
 
@@ -556,7 +559,42 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     }
 
     if (request.method === "GET" && url.pathname === "/api/spotify/accounts") {
-      return json(response, await service.spotifyAccountsView(url.searchParams.get("refresh") === "1"));
+      const view = await service.spotifyAccountsView(url.searchParams.get("refresh") === "1");
+      const names = await spotifyAccountNames();
+      return json(response, { ...view, accounts: view.accounts.map((account) => ({ ...account, name: names[`${account.sid}:${account.sn}`] })) });
+    }
+
+    // Play Spotify on another of the household's Spotify logins: from now on, and what
+    // plays now (the queue's Spotify songs or Spotify radio) moves over, in place.
+    const spotifyAccountMatch = url.pathname.match(/^\/api\/groups\/([^/]+)\/spotify-account$/);
+    if (request.method === "POST" && spotifyAccountMatch) {
+      const groupId = decodeURIComponent(spotifyAccountMatch[1]);
+      const body = await readJson<{ sid?: number; sn?: number }>(request);
+      const account = (await service.spotifyAccounts()).find((entry) => entry.sid === body.sid && entry.sn === body.sn);
+      if (!account) return json(response, { error: "That Spotify login isn't linked in the Sonos app" }, 400);
+      await store.setPreference(SPOTIFY_ACCOUNT_PREF, { sid: account.sid, sn: account.sn, token: account.token });
+      const result = await service.moveSpotifyToAccount(groupId, account);
+      sendEvent({ type: "now-playing", payload: result.nowPlaying, at: new Date().toISOString() });
+      return json(response, result);
+    }
+
+    // Spotify radio from the Spotify song playing now: its main artist's radio, on the
+    // same Spotify login. Sonos has no radio for a single song.
+    const spotifyRadioMatch = url.pathname.match(/^\/api\/groups\/([^/]+)\/spotify-radio$/);
+    if (request.method === "POST" && spotifyRadioMatch) {
+      const groupId = decodeURIComponent(spotifyRadioMatch[1]);
+      const current = await service.nowPlaying(groupId);
+      const track = spotifyTrackFromSonosUri(current.uri);
+      if (!track) return json(response, { error: "Play a Spotify song first" }, 400);
+      let artist: { id: string; name: string };
+      try {
+        artist = await fetchSpotifyTrackArtist(track);
+      } catch (error) {
+        return json(response, { error: `Couldn't find the song's artist on Spotify: ${sourceErrorMessage(error)}` }, 502);
+      }
+      const nowPlaying = await service.playSpotifyArtistRadio(groupId, artist, await service.spotifyAccountForUri(current.uri));
+      sendEvent({ type: "now-playing", payload: nowPlaying, at: new Date().toISOString() });
+      return json(response, { artist, nowPlaying });
     }
 
     const sourceSubsMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/subscriptions$/);
@@ -938,6 +976,12 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
   }
 
   // A key press can't wait out a discovery sweep, so this uses the rooms as last seen.
+  async function spotifyAccountNames(): Promise<Record<string, string>> {
+    const value = (await store.getPreference(SPOTIFY_ACCOUNT_NAMES_PREF))?.value;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== ""));
+  }
+
   async function selectedGroup(): Promise<SonosGroup> {
     const snapshot = await service.cachedSnapshot();
     const key = (await store.getPreference(SELECTED_GROUP_PREF))?.value;
