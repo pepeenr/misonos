@@ -119,3 +119,76 @@ export function SourcePicker({ sources, value, onChange, customIcons = {} }: Sou
     </div>
   );
 }
+
+/** A variant of one source with a button of its own, e.g. each Spotify login. */
+export interface SourceVariant {
+  key: string;
+  label: string;
+  title: string;
+  selected: boolean;
+  onSelect: () => void;
+}
+
+interface SourceTabsProps {
+  sources: SourceOption[];
+  value: string | null;
+  onChange: (id: string) => void;
+  customIcons?: Record<string, string>;
+  /** Sources offered as several buttons (by source id), e.g. Spotify per login. */
+  variants?: Record<string, SourceVariant[]>;
+}
+
+/**
+ * The sources as a row of logo buttons, styled like the Playing / Music / Library tabs.
+ * The chosen one shows its name too; a source with variants gets a named button each.
+ */
+export function SourceTabs({ sources, value, onChange, customIcons = {}, variants = {} }: SourceTabsProps) {
+  if (sources.length === 0) {
+    return <div className="source-picker-empty">No sources</div>;
+  }
+  const selectedId = (sources.find((source) => source.id === value) ?? sources[0]).id;
+  return (
+    <div className="source-tabs" role="group" aria-label="Source">
+      {sources.flatMap((source) => {
+        const own = variants[source.id];
+        if (own?.length) {
+          return own.map((variant) => {
+            const pressed = source.id === selectedId && variant.selected;
+            return (
+              <button
+                key={`${source.id}:${variant.key}`}
+                type="button"
+                className="source-tab named"
+                aria-pressed={pressed}
+                aria-label={variant.title}
+                title={variant.title}
+                onClick={() => {
+                  if (source.id !== selectedId) onChange(source.id);
+                  variant.onSelect();
+                }}
+              >
+                <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
+                <span aria-hidden="true">{variant.label}</span>
+              </button>
+            );
+          });
+        }
+        const pressed = source.id === selectedId;
+        return [(
+          <button
+            key={source.id}
+            type="button"
+            className={pressed ? "source-tab named" : "source-tab"}
+            aria-pressed={pressed}
+            aria-label={source.name}
+            title={source.name}
+            onClick={() => { if (!pressed) onChange(source.id); }}
+          >
+            <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
+            {pressed ? <span aria-hidden="true">{source.name}</span> : null}
+          </button>
+        )];
+      })}
+    </div>
+  );
+}

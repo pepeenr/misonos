@@ -4,11 +4,10 @@ import type { SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus } from
 import { bridgeApi } from "./api.js";
 import { apiUrl } from "./servers.js";
 import { accountKey, SPOTIFY_ACCOUNT_NAMES_PREF } from "./spotifyLogins.js";
+import { SPOTIFY_ACCOUNT_PREF } from "./spotifyProfiles.js";
 
 const CALLBACK_PATH = "/api/sources/spotify/auth/callback";
 const CREATE_APP_URL = "https://developer.spotify.com/dashboard/create";
-// Read by the bridge when it queues Spotify items (see SonosService.selectSpotifyAccount).
-const ACCOUNT_PREF_KEY = "spotifySonosAccount";
 
 // The bridge's OAuth callback as this browser reaches it, which is what Spotify
 // redirects back to.
@@ -121,7 +120,7 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
     setBusy(true);
     setError("");
     try {
-      await bridgeApi.setPreference(ACCOUNT_PREF_KEY, { sid: account.sid, sn: account.sn, token: account.token });
+      await bridgeApi.setPreference(SPOTIFY_ACCOUNT_PREF, { sid: account.sid, sn: account.sn, token: account.token });
       await loadAccounts();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save the account");

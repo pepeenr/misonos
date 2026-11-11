@@ -48,29 +48,31 @@ describe("useViewHistory", () => {
     expect(window.location.hash).toBe("");
   });
 
-  it("goes down to Playing from two screens up in one step", async () => {
+  it("goes down to Playing in one step, wherever an older version left it", async () => {
     openAt("/");
+    window.history.pushState({ misonosView: "browse", depth: 1 }, "", "/#music");
+    window.history.pushState({ misonosView: "settings", depth: 2 }, "", "/#settings");
     const { result } = renderHook(() => useViewHistory());
+    expect(result.current.view).toBe("settings");
 
-    act(() => result.current.navigate("browse"));
-    act(() => result.current.navigate("settings"));
     act(() => result.current.navigate("main"));
     await waitFor(() => expect(result.current.view).toBe("main"));
     expect(window.location.hash).toBe("");
   });
 
-  it("returns from Settings to the tab that opened it", async () => {
+  it("treats Settings like a tab: back from it lands on Playing", async () => {
     openAt("/");
     const { result } = renderHook(() => useViewHistory());
 
     act(() => result.current.navigate("library"));
     act(() => result.current.navigate("settings"));
     expect(window.location.hash).toBe("#settings");
+    act(() => result.current.navigate("editor"));
+    expect(window.location.hash).toBe("#groups");
 
     act(() => result.current.goBack());
-    await waitFor(() => expect(result.current.view).toBe("library"));
-    act(() => result.current.goBack());
     await waitFor(() => expect(result.current.view).toBe("main"));
+    expect(window.location.hash).toBe("");
   });
 
   it("opens straight on a screen from its link, with Playing beneath it", async () => {
