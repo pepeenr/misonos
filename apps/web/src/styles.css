@@ -4029,3 +4029,222 @@ small {
   text-align: center;
   white-space: nowrap;
 }
+
+/* ── Screens: Playing, Music and Library as tabs, plus the mini-player ──
+   Wide screens get a segmented control in the header; phones get a bar along the
+   bottom, in thumb reach. The bar sits inside the sticky header (no transform there,
+   so position: fixed still means the viewport). */
+
+.topbar.compact .topbar-actions {
+  align-items: center;
+  gap: 10px;
+}
+
+.view-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(242, 240, 232, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #aeb4ad;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.view-tab:hover {
+  color: #f2f0e8;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.view-tab[aria-current="page"] {
+  color: #91d3c4;
+  background: rgba(145, 211, 196, 0.16);
+}
+
+.view-tab:focus-visible {
+  outline: 2px solid #91d3c4;
+  outline-offset: 1px;
+}
+
+.mini-player {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 45;
+  transform: translateX(-50%);
+  width: min(640px, calc(100% - 48px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px 7px 7px;
+  overflow: hidden;
+  border: 1px solid rgba(242, 240, 232, 0.12);
+  /* The room's color, so it's clear which room these buttons drive. */
+  border-left: 3px solid var(--room-color, #91d3c4);
+  border-radius: 12px;
+  background: #1f2424;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.mini-player-progress {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: rgba(242, 240, 232, 0.08);
+}
+
+.mini-player-progress span {
+  display: block;
+  height: 100%;
+  background: var(--room-color, #91d3c4);
+  transition: width 0.6s linear;
+}
+
+.mini-player-open {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mini-player-open:focus-visible {
+  outline: 2px solid #91d3c4;
+  outline-offset: 2px;
+}
+
+.mini-player-art {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #2a2f2e;
+}
+
+.mini-player-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mini-player-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.mini-player-copy strong,
+.mini-player-copy small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mini-player-copy strong {
+  font-size: 0.93rem;
+}
+
+.mini-player-copy small {
+  color: #aeb4ad;
+  font-size: 0.8rem;
+}
+
+.icon-button.mini-player-toggle {
+  width: 42px;
+  height: 42px;
+  border-color: transparent;
+  background: rgba(145, 211, 196, 0.85);
+  color: #141716;
+}
+
+.icon-button.mini-player-next {
+  border-color: transparent;
+  background: transparent;
+}
+
+.mini-player button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (min-width: 641px) {
+  .app-shell.with-mini-player {
+    padding-bottom: 104px;
+  }
+}
+
+@media (max-width: 640px) {
+  .view-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    padding: 5px 10px calc(5px + env(safe-area-inset-bottom));
+    border: 0;
+    border-top: 1px solid rgba(242, 240, 232, 0.08);
+    border-radius: 0;
+    background: #141716;
+  }
+
+  .view-tab {
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    height: 50px;
+    padding: 0;
+    border-radius: 10px;
+    font-size: 0.74rem;
+  }
+
+  .view-tab svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  .app-shell.with-tabs {
+    padding-bottom: calc(14px + 61px + env(safe-area-inset-bottom));
+  }
+
+  .app-shell.with-tabs.with-mini-player {
+    padding-bottom: calc(14px + 61px + 68px + env(safe-area-inset-bottom));
+  }
+
+  .mini-player {
+    left: 8px;
+    right: 8px;
+    bottom: calc(61px + 6px + env(safe-area-inset-bottom));
+    width: auto;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mini-player-progress span {
+    transition: none;
+  }
+}

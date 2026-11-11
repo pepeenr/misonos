@@ -47,6 +47,24 @@ describe("App", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    // The screen lives in the URL (#settings, #music): start every test on Playing.
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("keeps the song in reach on Music, and goes back to Playing from it", async () => {
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+    const tabs = await screen.findByRole("navigation", { name: "Screens" });
+    fireEvent.click(within(tabs).getByRole("button", { name: "Music" }));
+    expect(window.location.hash).toBe("#music");
+    expect(within(tabs).getByRole("button", { name: "Music" })).toHaveAttribute("aria-current", "page");
+
+    const bar = await screen.findByRole("region", { name: "Now playing" });
+    expect(within(bar).getByText("Song")).toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: "Pause" })).toBeInTheDocument();
+
+    fireEvent.click(within(bar).getByRole("button", { name: /^Open Playing/ }));
+    await waitFor(() => expect(window.location.hash).toBe(""));
+    expect(await screen.findByRole("button", { name: "Previous" })).toBeInTheDocument();
   });
 
   it("renders the controller shell", async () => {

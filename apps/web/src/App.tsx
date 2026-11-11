@@ -1,5 +1,4 @@
-import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, Library, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
-import { IconMusic } from "@tabler/icons-react";
+import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, PlayHistoryChange, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
@@ -31,6 +30,8 @@ import { SpotifyNowPlaying } from "./SpotifyNowPlaying.js";
 import { spotifyLoginOfUri } from "./spotifyLogins.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
+import { MiniPlayer, ViewTabs } from "./Navigation.js";
+import { isTabView, useViewHistory } from "./viewHistory.js";
 
 const GroupEditor = lazy(() => import("./GroupEditor.js").then((module) => ({ default: module.GroupEditor })));
 const LibraryView = lazy(() => import("./LibraryView.js").then((module) => ({ default: module.LibraryView })));
@@ -72,7 +73,8 @@ export function App() {
   const [groupEditBusy, setGroupEditBusy] = useState(false);
   const [pendingGroupEdits, setPendingGroupEdits] = useState<PendingGroupEdit[]>([]);
   const [state, setState] = useState<LoadState>("idle");
-  const [view, setView] = useState<"main" | "settings" | "browse" | "editor" | "library">("main");
+  const { view, navigate, goBack } = useViewHistory();
+  const tabView = isTabView(view);
   const [artworkFullscreen, setArtworkFullscreen] = useState(false);
   const [artworkMetaOpen, setArtworkMetaOpen] = useState(true);
   const [vuOpen, setVuOpen] = useState(false);
@@ -818,58 +820,58 @@ export function App() {
     G: () => cycleRoom(1),
     "Shift+G": () => cycleRoom(-1),
     "Shift+K": () => { void pauseAllGroups(); },
-    E: () => { if (view === "editor") return false; setView("editor"); },
+    E: () => { if (view === "editor") return false; navigate("editor"); },
     A: () => { if (!artworkFullscreen) return false; setArtworkFullscreen(false); },
     V: () => { if (!vuOpen) return false; setVuOpen(false); },
     Escape: () => {
       if (vuOpen) setVuOpen(false);
       else if (artworkFullscreen) setArtworkFullscreen(false);
       else if (volumePopoverOpen) setVolumePopoverOpen(false);
+      // Music and Library have no Back button: Esc goes back to Playing from them.
+      else if (view === "browse" || view === "library") goBack();
       else return false;
     },
     "?": () => setShortcutsOpen(true),
     // The main screen and Music each have a search box that takes "/"; elsewhere, go to the main screen's.
     "/": () => {
       if (view === "main" || view === "browse") return false;
-      setView("main");
+      navigate("main");
       setSearchFocusRequest((count) => count + 1);
     }
   });
 
+  // On Music and Library, what the room is playing stays in reach (it's the whole screen on Playing).
+  const miniPlayerShown = (view === "browse" || view === "library") && !!effectiveNowPlaying?.title;
+
   return (
-    <main className="app-shell">
-      <header className={`topbar ${view === "main" ? "compact main" : "compact"}`}>
-        {view === "main" ? (
+    <main className={`app-shell${tabView ? " with-tabs" : ""}${miniPlayerShown ? " with-mini-player" : ""}`}>
+      <header className={`topbar ${tabView ? "compact main" : "compact"}`}>
+        {tabView ? (
           <>
             <GroupDropdown
               options={groupOptions}
               selectedId={selectedGroupId || selectedGroup?.id}
               selectedOption={selectedGroupOption}
               onSelect={setSelectedGroupId}
-              onEditGroups={() => setView("editor")}
+              onEditGroups={() => navigate("editor")}
               playback={targetPlayback}
               onTogglePlay={(groupId, playing) => { if (groupId === LOCAL_DEVICE_ID) localPlayer.toggle(); else void toggleGroupPlayback(groupId, playing ? "pause" : "play"); }}
               onPauseAll={() => void pauseAllGroups()}
               onOpen={() => { if (groups.length > 0) void loadGroupPlayback(groups); }}
             />
             <div className="topbar-actions">
-              <button className="icon-button" type="button" title="Browse music sources (B)" aria-label="Browse music sources" aria-keyshortcuts="B" onClick={() => setView("browse")}>
-                <IconMusic size={18} />
-              </button>
-              <button className="icon-button" type="button" title="Library: favorites & playlists (L)" aria-label="Library" aria-keyshortcuts="L" onClick={() => setView("library")}>
-                <Library size={18} />
-              </button>
-              <button className="icon-button" type="button" title="Settings (,)" aria-label="Settings" aria-keyshortcuts="," onClick={() => setView("settings")}>
+              <ViewTabs view={view} onSelect={navigate} />
+              <button className="icon-button" type="button" title="Settings (,)" aria-label="Settings" aria-keyshortcuts="," onClick={() => navigate("settings")}>
                 <Settings size={18} />
               </button>
             </div>
           </>
         ) : (
           <>
-            <button className="icon-button topbar-back" type="button" title="Back (Esc)" aria-label="Back" aria-keyshortcuts="Escape" onClick={() => setView("main")}>
+            <button className="icon-button topbar-back" type="button" title="Back (Esc)" aria-label="Back" aria-keyshortcuts="Escape" onClick={goBack}>
               <ArrowLeft size={18} />
             </button>
-            <span className="topbar-title">{view === "settings" ? "Settings" : view === "browse" ? "Music" : view === "library" ? "Library" : "Group Editor"}</span>
+            <span className="topbar-title">{view === "settings" ? "Settings" : "Group Editor"}</span>
             {view === "settings" ? (
               <>
                 <p className="eyebrow">MiSonos</p>
@@ -932,13 +934,11 @@ export function App() {
         style={view === "browse" ? undefined : { display: "none" }}
       >
         <SourceBrowser
-          groups={displayGroups}
           selectedGroupId={selectedGroupId || selectedGroup?.id}
-          onSelectGroup={setSelectedGroupId}
           customIcons={customIcons}
           sourcesVersion={sourcesVersion}
           searchSlot={searchSlot}
-          onSearch={() => setView("browse")}
+          onSearch={() => navigate("browse")}
           searchFocusRequest={searchFocusRequest}
           youtubeJob={youtubeJob}
           onYouTubeJob={setYoutubeJob}
@@ -1008,7 +1008,7 @@ export function App() {
               onJoinZoneGroup={(zoneId, groupId) => void joinZoneToGroup(zoneId, groupId)}
               onUngroupZone={(zoneId) => void makeZoneStandalone(zoneId)}
               onPromoteZone={(zoneId) => void promoteZone(zoneId)}
-              onClose={() => setView("main")}
+              onClose={goBack}
             />
           </Suspense>
         </section>
@@ -1019,6 +1019,9 @@ export function App() {
               groups={displayGroups}
               selectedGroupId={selectedGroup?.id}
               onSelectGroup={setSelectedGroupId}
+              // The room menu up top picks the room, unless it's on "This device",
+              // which the library can't play to: then it needs its own picker.
+              showGroupPicker={localMode}
             />
           </Suspense>
         </section>
@@ -1323,6 +1326,23 @@ export function App() {
         />
       </section>
       ) : null}
+      {miniPlayerShown && effectiveNowPlaying?.title ? (
+        <MiniPlayer
+          title={effectiveNowPlaying.title}
+          subtitle={effectiveNowPlaying.artist || effectiveNowPlaying.album || undefined}
+          albumArtUri={effectiveNowPlaying.albumArtUri}
+          roomName={selectedGroupOption?.name}
+          roomColor={selectedGroupOption?.device ? undefined : selectedGroupOption?.color}
+          playing={effectivePlaying}
+          enabled={transportEnabled}
+          live={isLiveStream}
+          percent={effectiveProgress.durationSeconds > 0 ? effectiveProgress.percent : 0}
+          onOpen={() => navigate("main")}
+          onPlayPause={onPlayPause}
+          onNext={onNextTrack}
+        />
+      ) : null}
+
       {artworkFullscreen && nowPlaying?.albumArtUri ? (
         <div className="artwork-overlay" role="dialog" aria-label="Now playing artwork" onClick={() => setArtworkFullscreen(false)}>
           {!noChrome ? (
@@ -1377,9 +1397,7 @@ export function App() {
 }
 
 interface SourceBrowserProps {
-  groups: SonosGroup[];
   selectedGroupId?: string;
-  onSelectGroup: (groupId: string) => void;
   customIcons: Record<string, string>;
   sourcesVersion: number;
   /** Where the search box goes: a slot on the main screen, present while it shows. */
@@ -1404,7 +1422,7 @@ function BrowseThumb({ src }: { src?: string }) {
   return <img className="browse-thumb" src={artSrc(src)} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
+function SourceBrowser({ selectedGroupId, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
   const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>> | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
   const sourceInitializedRef = useRef(false);
@@ -1611,9 +1629,6 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
       });
     }
   }, [sourceId, pinnedIds]);
-
-  const groupColors = useGroupColors();
-  const browseGroupOptions = useMemo(() => [...buildGroupOptions(groups, groupColors), DEVICE_OPTION], [groups, groupColors]);
 
   const runSearch = useCallback(async (overrideType?: "song" | "artist" | "album") => {
     const query = searchQuery.trim();
@@ -1836,15 +1851,6 @@ function SourceBrowser({ groups, selectedGroupId, onSelectGroup, customIcons, so
             value={sourceId}
             onChange={(id) => { persistSourceId(id); setStack([]); clearSearch(); }}
             customIcons={customIcons}
-          />
-        </label>
-        <label>
-          <span>Play to group</span>
-          <GroupDropdown
-            options={browseGroupOptions}
-            selectedId={selectedGroupId}
-            selectedOption={browseGroupOptions.find((option) => option.id === selectedGroupId) ?? browseGroupOptions[0]}
-            onSelect={onSelectGroup}
           />
         </label>
       </div>

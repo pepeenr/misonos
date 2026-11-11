@@ -171,7 +171,7 @@ export const SHORTCUT_GROUPS: { title: string; entries: ShortcutEntry[] }[] = [
     entries: [
       { keys: ["A"], label: "Full-screen album art" },
       { keys: ["V"], label: "VU meter" },
-      { keys: ["B"], label: "Music sources" },
+      { keys: ["B"], label: "Music" },
       { keys: ["L"], label: "Library" },
       { keys: [","], label: "Settings" },
       { keys: ["/"], label: "Search" },
