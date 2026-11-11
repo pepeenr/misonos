@@ -37,8 +37,10 @@ export class DowntifyError extends Error {
   }
 }
 
-// Downtify answers a download only once yt-dlp and ffmpeg are done with it.
-const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+// Downtify answers a download only once yt-dlp and ffmpeg are done with it. Its
+// "Longest track taken" setting can let through hour-long (up to 6-hour) uploads,
+// so the wait is long enough for those, not just for songs.
+const DOWNLOAD_TIMEOUT_MS = 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 60 * 1000;
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 
