@@ -93,6 +93,16 @@ export class SpotifyBrowser {
     }
   }
 
+  /** A track's main (first) artist, which Spotify radio is started from. */
+  async trackArtist(rawId: string): Promise<{ id: string; name: string }> {
+    const uri = parseSpotifyUri(rawId);
+    if (uri?.type !== "track") throw new IdError(`Not a Spotify track: ${rawId}`);
+    const track = await this.api.get<SpotifyTrack>(`/tracks/${uri.id}`);
+    const artist = track.artists?.find((entry) => entry?.id);
+    if (!artist) throw new IdError(`“${track.name}” has no artist on Spotify`);
+    return { id: artist.id, name: artist.name };
+  }
+
   private async browseNode(node: SpotifyNode): Promise<SourceBrowseItem[]> {
     switch (node.kind) {
       case "root":

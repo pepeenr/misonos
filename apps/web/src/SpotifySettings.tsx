@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus } from "@misonos/sonos-protocol";
 import { bridgeApi } from "./api.js";
 import { apiUrl } from "./servers.js";
+import { accountKey, SPOTIFY_ACCOUNT_NAMES_PREF } from "./spotifyLogins.js";
 
 const CALLBACK_PATH = "/api/sources/spotify/auth/callback";
 const CREATE_APP_URL = "https://developer.spotify.com/dashboard/create";
@@ -128,6 +129,24 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
       setBusy(false);
     }
   }, [loadAccounts]);
+
+  // Sonos only numbers its Spotify logins; a name ("Mia") is what the main screen offers.
+  const saveName = useCallback(async (account: { sid: number; sn: number; name?: string }, name: string) => {
+    if ((account.name ?? "") === name.trim() || !accounts) return;
+    const names: Record<string, string> = {};
+    for (const entry of accounts.accounts) {
+      if (entry.name?.trim()) names[accountKey(entry)] = entry.name.trim();
+    }
+    if (name.trim()) names[accountKey(account)] = name.trim();
+    else delete names[accountKey(account)];
+    setError("");
+    try {
+      await bridgeApi.setPreference(SPOTIFY_ACCOUNT_NAMES_PREF, names);
+      await loadAccounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save the name");
+    }
+  }, [accounts, loadAccounts]);
 
   if (unavailable || !status || !client) return null;
 
@@ -263,27 +282,40 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
                 {pinnedByEnv
                   ? `Set to Spotify login #${selected.sn} by MISONOS_SPOTIFY_SN.`
                   : accounts.accounts.length > 1
-                    ? `${accounts.accounts.length} Spotify logins are linked in the Sonos app. Sonos only numbers them, without names, so each is listed with the Sonos Favorites (or queued songs) that use it. Pick the one whose favorites are yours: songs play on that Spotify account.`
+                    ? `${accounts.accounts.length} Spotify logins are linked in the Sonos app. Sonos only numbers them, without names, so each is listed with the Sonos Favorites (or queued songs) that use it. Pick the one songs play on, and name them (Mia, Pepe): while Spotify plays, the main screen switches between the named ones.`
                     : "Songs play on the Spotify login linked in the Sonos app."}
               </p>
               <div className="settings-card-row settings-card-column" role="radiogroup" aria-label="Sonos Spotify login">
                 {accounts.accounts.map((account) => {
                   const checked = selected?.sid === account.sid && selected.sn === account.sn;
                   return (
-                    <label key={`${account.sid}:${account.sn}`} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <div key={`${account.sid}:${account.sn}`} className="spotify-login-setting">
+                      <label style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                        <input
+                          type="radio"
+                          name="spotify-sonos-account"
+                          checked={checked}
+                          disabled={busy || pinnedByEnv}
+                          onChange={() => void chooseAccount(account)}
+                        />
+                        <span>
+                          {account.name ? `${account.name} (login #${account.sn})` : `Spotify login #${account.sn}`}
+                          {checked && selected?.origin === "auto" ? " (picked automatically: most favorites)" : ""}
+                          {account.seenOn.length ? <small className="settings-card-help" style={{ display: "block" }}>Used by {account.seenOn.join(", ")}</small> : null}
+                        </span>
+                      </label>
                       <input
-                        type="radio"
-                        name="spotify-sonos-account"
-                        checked={checked}
-                        disabled={busy || pinnedByEnv}
-                        onChange={() => void chooseAccount(account)}
+                        key={account.name ?? ""}
+                        type="text"
+                        className="spotify-login-name"
+                        aria-label={`Name for Spotify login #${account.sn}`}
+                        placeholder="Name, e.g. Mia"
+                        defaultValue={account.name ?? ""}
+                        maxLength={40}
+                        onBlur={(event) => void saveName(account, event.currentTarget.value)}
+                        onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                       />
-                      <span>
-                        Spotify login #{account.sn}
-                        {checked && selected?.origin === "auto" ? " (picked automatically: most favorites)" : ""}
-                        {account.seenOn.length ? <small className="settings-card-help" style={{ display: "block" }}>Used by {account.seenOn.join(", ")}</small> : null}
-                      </span>
-                    </label>
+                    </div>
                   );
                 })}
               </div>

@@ -109,9 +109,11 @@ export class PlayHistoryRecorder {
 }
 
 // What a play is: a radio station keeps its URI while the song title changes, so the
-// title is part of it.
+// title is part of it. Which Spotify login plays it (sid, sn) isn't: moving the music to
+// another login goes on with the same song.
 function playKey(nowPlaying: NowPlaying): string {
-  return [nowPlaying.uri ?? "", nowPlaying.title.trim(), nowPlaying.artist?.trim() ?? ""].join("\n");
+  const uri = (nowPlaying.uri ?? "").replace(/([?&])(sid|sn)=\d+/g, "$1");
+  return [uri, nowPlaying.title.trim(), nowPlaying.artist?.trim() ?? ""].join("\n");
 }
 
 // The TV and line-in aren't songs; a stream without a title has nothing to show, and

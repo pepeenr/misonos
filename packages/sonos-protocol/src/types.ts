@@ -283,6 +283,8 @@ export interface SonosSpotifyAccount {
   // Titles of items it was found on, to tell several linked accounts apart.
   seenOn: string[];
   uses: number;
+  // What the household called it in Settings ("Mia"); Sonos only numbers them.
+  name?: string;
 }
 
 export type SpotifyAccountOrigin = "env" | "preference" | "auto";

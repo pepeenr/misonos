@@ -103,3 +103,88 @@ export function spotifyTrackFromSonosUri(uri: string | undefined): string | unde
   if (!match) return undefined;
   return decodeURIComponent(match[1]);
 }
+
+// --- Switching a Spotify login, and Spotify radio ------------------------------------
+
+type SpotifyAccountRef = Pick<SonosSpotifyAccount, "sid" | "sn" | "token">;
+
+const DIDL_ROOT_OPEN = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/">`;
+
+/** A URI Sonos plays through a Spotify login: a song, a whole album or playlist, or radio. */
+export function isSonosSpotifyUri(uri: string | undefined): boolean {
+  if (!uri) return false;
+  return /^x-sonos-spotify:/i.test(uri) || /^(x-sonosapi-radio|x-rincon-cpcontainer):[0-9a-f]*spotify%3a/i.test(uri);
+}
+
+/** Which login (sid, sn) a Sonos Spotify URI plays on. */
+export function spotifyAccountOfUri(uri: string | undefined): { sid: number; sn: number } | undefined {
+  if (!uri || !isSonosSpotifyUri(uri)) return undefined;
+  const params = new URLSearchParams(uri.slice(uri.indexOf("?") + 1));
+  const sid = Number.parseInt(params.get("sid") ?? "", 10);
+  const sn = Number.parseInt(params.get("sn") ?? "", 10);
+  return Number.isInteger(sid) && Number.isInteger(sn) ? { sid, sn } : undefined;
+}
+
+/** The same Sonos Spotify URI on another login. Anything else comes back unchanged. */
+export function withSpotifyAccount(uri: string, account: Pick<SonosSpotifyAccount, "sid" | "sn">): string {
+  if (!spotifyAccountOfUri(uri)) return uri;
+  return uri.replace(/([?&]sid=)\d+/, `$1${account.sid}`).replace(/([?&]sn=)\d+/, `$1${account.sn}`);
+}
+
+/** DIDL metadata with the login's token (the cdudn desc) swapped in. */
+export function withSpotifyToken(metadata: string, token: string): string {
+  return metadata.replace(/(<desc\b[^>]*>)SA_RINCON[^<]*(<\/desc>)/gi, `$1${escapeXml(token)}$2`);
+}
+
+/** A queued item as ContentDirectory lists it (Q:0): its URI and its <item> markup. */
+export interface QueuedItem {
+  uri: string;
+  xml: string;
+  title: string;
+  artist?: string;
+  album?: string;
+  albumArtUri?: string;
+}
+
+/**
+ * The queue entry that plays `item` on `account`. A Spotify song gets fresh metadata in
+ * the form MiSonos queues it; anything else is queued again as it was.
+ */
+export function queuedItemOnAccount(item: QueuedItem, account: SpotifyAccountRef): { uri: string; metadata: string; spotify: boolean } {
+  const track = spotifyTrackFromSonosUri(item.uri);
+  if (track) {
+    const entry = spotifyQueueItem({ id: track, title: item.title, artist: item.artist, album: item.album, albumArtUri: item.albumArtUri, url: track }, account);
+    return { ...entry, spotify: true };
+  }
+  if (isSonosSpotifyUri(item.uri)) {
+    return { uri: withSpotifyAccount(item.uri, account), metadata: withSpotifyToken(didlOf(item.xml), account.token), spotify: true };
+  }
+  return { uri: item.uri, metadata: didlOf(item.xml), spotify: false };
+}
+
+// An <item> from the queue listing as metadata to queue again: its queue ids ("Q:0/7")
+// mean nothing outside the queue.
+function didlOf(itemXml: string): string {
+  const item = itemXml.replace(/^<item\b[^>]*>/i, (open) => open
+    .replace(/\sid="[^"]*"/i, ' id="-1"')
+    .replace(/\sparentID="[^"]*"/i, ' parentID="-1"'));
+  return `${DIDL_ROOT_OPEN}${item}</DIDL-Lite>`;
+}
+
+/**
+ * Spotify's radio for an artist, the way the Sonos app starts it: endless songs like
+ * the artist's, on `account`. Sonos documents no radio for a single song.
+ */
+export function spotifyArtistRadioItem(artist: { id: string; name: string }, account: SpotifyAccountRef): { uri: string; metadata: string } {
+  // Lower-case %3a, as the Sonos app writes these ids.
+  const id = encodeURIComponent(`spotify:artistRadio:${artist.id}`).replace(/%3A/g, "%3a");
+  const parent = encodeURIComponent(`spotify:artist:${artist.id}`).replace(/%3A/g, "%3a");
+  const uri = `x-sonosapi-radio:${id}?sid=${account.sid}&flags=8300&sn=${account.sn}`;
+  const metadata = DIDL_ROOT_OPEN +
+    `<item id="100c206c${escapeXml(id)}" parentID="10052064${escapeXml(parent)}" restricted="true">` +
+    `<dc:title>${escapeXml(`${artist.name} Radio`)}</dc:title>` +
+    `<upnp:class>object.item.audioItem.audioBroadcast.#artistRadio</upnp:class>` +
+    `<desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">${escapeXml(account.token)}</desc>` +
+    `</item></DIDL-Lite>`;
+  return { uri, metadata };
+}

@@ -75,6 +75,13 @@ describe("the play history", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("doesn't count a song moved to another Spotify login as a new play", async () => {
+    const onLogin = (sn: number) => playing("g1", "Spotify song", { uri: `x-sonos-spotify:spotify%3atrack%3aabc?sid=9&flags=8232&sn=${sn}` });
+    await at(0, onLogin(3));
+    await at(1, onLogin(5));
+    expect(rows).toHaveLength(1);
+  });
+
   it("lists a song again when it comes back later", async () => {
     await at(0, playing("g1", "One"));
     await at(SAME_PLAY_MS / 60_000 + 1, playing("g1", "One"));

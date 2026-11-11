@@ -190,6 +190,12 @@ describe("SpotifyBrowser", () => {
     expect(await spotify.track("spotify:playlist:pl5")).toMatchObject({ title: "List Five", artist: "Owner", url: "spotify:playlist:pl5" });
   });
 
+  it("finds a track's main artist, for Spotify radio", async () => {
+    const spotify = browser({ "/tracks/t9": track("t9", "Ninth") });
+    expect(await spotify.trackArtist("spotify:track:t9")).toEqual({ id: "ar1", name: "Artist One" });
+    await expect(spotify.trackArtist("spotify:album:al1")).rejects.toThrow("Not a Spotify track");
+  });
+
   it("rejects ids that aren't its own", async () => {
     const spotify = browser({});
     await expect(spotify.browse("album:../me")).rejects.toThrow(/Bad Spotify id/);
