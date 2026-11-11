@@ -309,7 +309,7 @@ button {
 
 .controller-grid.main-view {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "now" "search" "presets" "queue" "playlists";
+  grid-template-areas: "now" "search" "presets" "queue" "playlists" "history";
 }
 
 /* Music's search box, as a card on the main screen (rendered by SourceBrowser). */
@@ -1798,6 +1798,130 @@ h2 {
 @keyframes playlist-starting {
   from { opacity: 1; }
   to { opacity: 0.45; }
+}
+
+/* The main screen's History: songs every room played, in days, newest first. The
+   whole list scrolls inside the card, like the queue; the day lists don't scroll on their own. */
+.queue-panel.history-panel {
+  grid-area: history;
+}
+
+.history-body {
+  display: grid;
+  gap: 10px;
+}
+
+.history-scroll {
+  display: grid;
+  gap: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.history-day {
+  display: grid;
+  gap: 8px;
+}
+
+.history-day-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 4px 2px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a8e88;
+  background: rgb(31, 35, 34);
+}
+
+.queue-list.history-list {
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.history-item-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(242, 240, 232, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.history-item .queue-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #aeb4ad;
+}
+
+.history-when {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  max-width: 9.5rem;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: #d7d2c4;
+}
+
+.history-when small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #8a8e88;
+}
+
+.history-item .browse-thumb {
+  width: 42px;
+  height: 42px;
+}
+
+/* Two action buttons (40px) and the gap between them. */
+.history-action-spacer {
+  flex: 0 0 86px;
+}
+
+.history-item .browse-thumb-empty svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* On a phone the time and room go under the artist, so the title keeps the width, and
+   a row keeps only its play buttons (the whole history still clears from the title row). */
+@media (max-width: 640px) {
+  .history-item-main {
+    grid-template-columns: 36px minmax(0, 1fr);
+    column-gap: 8px;
+    row-gap: 3px;
+    padding: 8px;
+  }
+  .history-item .browse-thumb { grid-row: span 2; width: 36px; height: 36px; }
+  .history-when {
+    grid-column: 2;
+    display: flex;
+    gap: 6px;
+    max-width: none;
+    font-size: 0.78rem;
+    color: #8a8e88;
+  }
+  .history-when small { font-size: inherit; }
+  .history-when small::before { content: "· "; }
+  .history-action-spacer,
+  .history-item .queue-remove { display: none; }
 }
 
 .playlists-more {

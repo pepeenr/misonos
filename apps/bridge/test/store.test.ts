@@ -301,4 +301,28 @@ describe("bridge store", () => {
       await store.close();
     }
   });
+
+  it("keeps every play in the history, newest first, pages back and deletes", async () => {
+    const store = await createStore(":memory:");
+    try {
+      const base = { groupId: "g1", rooms: "Living Room", artist: "Artist", album: null, albumArtUri: null };
+      const one = await store.addPlayHistory({ ...base, playedAt: "2026-11-11T18:00:00.000Z", title: "One", sourceId: "navidrome", trackId: "1" });
+      await store.addPlayHistory({ ...base, playedAt: "2026-11-11T18:04:00.000Z", title: "Radio song", isLive: true });
+      const again = await store.addPlayHistory({ ...base, playedAt: "2026-11-11T19:00:00.000Z", title: "One", sourceId: "navidrome", trackId: "1" });
+      expect(one).toMatchObject({ title: "One", rooms: "Living Room", sourceId: "navidrome", trackId: "1", isLive: false });
+      expect(again.id).toBeGreaterThan(one.id);
+
+      const rows = await store.listPlayHistory();
+      expect(rows.map((row) => row.title)).toEqual(["One", "Radio song", "One"]);
+      expect(rows[1]).toMatchObject({ isLive: true, sourceId: null, trackId: null });
+      expect((await store.listPlayHistory(1, again.id)).map((row) => row.title)).toEqual(["Radio song"]);
+
+      await store.deletePlayHistory(one.id);
+      expect(await store.listPlayHistory()).toHaveLength(2);
+      await store.clearPlayHistory();
+      expect(await store.listPlayHistory()).toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
 });

@@ -155,12 +155,13 @@ export const SHORTCUT_GROUPS: { title: string; entries: ShortcutEntry[] }[] = [
     ]
   },
   {
-    title: "Queue and playlists",
+    title: "Queue, playlists and history",
     entries: [
       { keys: ["Q"], label: "Show or hide the queue" },
       { keys: ["Shift Q"], label: "Save the queue as a playlist" },
       { keys: ["Shift Delete"], label: "Clear the queue" },
       { keys: ["Shift L"], label: "Show or hide playlists" },
+      { keys: ["H"], label: "Show or hide the history" },
       { keys: ["1 – 9"], label: "Play playlist 1 to 9" },
       { keys: ["Shift 1 – 9"], label: "Tune in preset 1 to 9" }
     ]

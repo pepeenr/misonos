@@ -351,6 +351,32 @@ export interface RecentlyPlayedItem {
   playedAt: string;
 }
 
+// One song (or station) as it started playing in a room, for the main screen's History.
+// Every play is a row, from any app, not only MiSonos: a song that comes back later is
+// listed again. `sourceId`/`trackId` are set when it came from a MiSonos source, so it
+// can be played again from here.
+export interface PlayHistoryEntry {
+  id: number;
+  playedAt: string; // ISO-8601
+  groupId: string;
+  /** The rooms that played it, e.g. "Living Room + Office". */
+  rooms: string;
+  title: string;
+  artist?: string | null;
+  album?: string | null;
+  albumArtUri?: string | null;
+  sourceId?: string | null;
+  trackId?: string | null;
+  /** A live stream (internet radio) rather than a song. */
+  isLive?: boolean;
+}
+
+/** A song went into the history. `replacedId`: the previous row, dropped because it was skipped within seconds. */
+export interface PlayHistoryChange {
+  entry: PlayHistoryEntry;
+  replacedId?: number;
+}
+
 export interface EqPreset {
   id: number;
   name: string;
@@ -523,4 +549,5 @@ export type BridgeEvent =
   | { type: "now-playing"; payload: NowPlaying; at: string }
   | { type: "volume"; payload: GroupVolumes; at: string }
   | { type: "youtube-import"; payload: YouTubeImportJob; at: string }
+  | { type: "history"; payload: PlayHistoryChange; at: string }
   | { type: "error"; message: string; at: string };

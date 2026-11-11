@@ -2,7 +2,7 @@ import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, Gri
 import { IconMusic } from "@tabler/icons-react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
+import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, PlayHistoryChange, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
 import { startAccessSignIn, useAccessSignedOut } from "./accessSession.js";
 import { artSrc, bridgeApi, subscribeBridgeEvents } from "./api.js";
@@ -21,11 +21,12 @@ import { YouTubeSettings } from "./YouTubeSettings.js";
 import { describeImport, describeLink, isYouTubeLink } from "./youtube.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
-import { FULLSCREEN_NO_CHROME_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
+import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
 import { forgetPlaylists, pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { SettingsCard, SettingsSection } from "./SettingsSection.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
+import { HistoryPanel } from "./HistoryPanel.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
 
@@ -100,6 +101,8 @@ export function App() {
   const [maxVolume, setMaxVolume] = useState<number>(() => readLocalPref(MAX_VOLUME_PREF) ?? 100);
   const [queueCollapsed, setQueueCollapsed] = useState<boolean>(() => readLocalPref(QUEUE_COLLAPSED_PREF) ?? false);
   const [playlistsCollapsed, setPlaylistsCollapsed] = useState<boolean>(() => readLocalPref(PLAYLISTS_COLLAPSED_PREF) ?? false);
+  const [historyCollapsed, setHistoryCollapsed] = useState<boolean>(() => readLocalPref(HISTORY_COLLAPSED_PREF) ?? false);
+  const [historyChange, setHistoryChange] = useState<PlayHistoryChange | null>(null);
   const [playlistsSourcePref, setPlaylistsSourcePref] = useState<string | null>(() => readLocalPref(PLAYLISTS_SOURCE_PREF));
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const dialogs = useDialogs();
@@ -367,6 +370,7 @@ export function App() {
       const job = event.payload;
       setYoutubeJob((current) => (!current || current.id === job.id || job.startedAt >= current.startedAt ? job : current));
     }
+    if (event.type === "history") setHistoryChange(event.payload);
     if (event.type === "error") setMessage(event.message);
   }, () => setMessage("Bridge event stream disconnected")), [applySnapshot, applyVolumes, selectedGroup?.id]);
 
@@ -774,6 +778,10 @@ export function App() {
   const togglePlaylistsCollapsed = () => {
     setPlaylistsCollapsed(!playlistsCollapsed);
     setLocalPref(PLAYLISTS_COLLAPSED_PREF, !playlistsCollapsed);
+  };
+  const toggleHistoryCollapsed = () => {
+    setHistoryCollapsed(!historyCollapsed);
+    setLocalPref(HISTORY_COLLAPSED_PREF, !historyCollapsed);
   };
   const onPlaylistPlayed = useCallback((next: NowPlaying) => {
     setNowPlaying(next);
@@ -1299,6 +1307,15 @@ export function App() {
             reloadKey={playlistsReload}
           />
         ) : null}
+
+        <HistoryPanel
+          groupId={selectedGroup?.id}
+          localMode={localMode}
+          collapsed={historyCollapsed}
+          onToggleCollapsed={toggleHistoryCollapsed}
+          onPlayed={onPlaylistPlayed}
+          change={historyChange}
+        />
       </section>
       ) : null}
       {artworkFullscreen && nowPlaying?.albumArtUri ? (

@@ -211,13 +211,37 @@ const m006_recently_played: Migration = {
   }
 };
 
+// Play history: every song as it started in a room, for the main screen's History card.
+const m007_play_history: Migration = {
+  async up(db: Kysely<unknown>): Promise<void> {
+    await db.schema
+      .createTable("play_history")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("played_at", "text", (c) => c.notNull())
+      .addColumn("group_id", "text", (c) => c.notNull())
+      .addColumn("rooms", "text", (c) => c.notNull())
+      .addColumn("title", "text", (c) => c.notNull())
+      .addColumn("artist", "text")
+      .addColumn("album", "text")
+      .addColumn("image", "text")
+      .addColumn("source_id", "text")
+      .addColumn("track_id", "text")
+      .addColumn("is_live", "integer", (c) => c.notNull().defaultTo(0))
+      .execute();
+  },
+  async down(db: Kysely<unknown>): Promise<void> {
+    await db.schema.dropTable("play_history").execute();
+  }
+};
+
 const migrations: Record<string, Migration> = {
   "001_init": m001_init,
   "002_library": m002_library,
   "003_favorite_presets": m003_favorite_presets,
   "004_playlist_resume": m004_playlist_resume,
   "005_recent_queues": m005_recent_queues,
-  "006_recently_played": m006_recently_played
+  "006_recently_played": m006_recently_played,
+  "007_play_history": m007_play_history
 };
 
 export const migrationProvider: MigrationProvider = {
