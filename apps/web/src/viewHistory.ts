@@ -2,13 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 // Which screen shows, kept in the browser history so the phone's back gesture, the
 // browser's back button and a reload all do what they should. Playing is the base
-// entry; Music and Library sit one step above it (switching between them replaces
-// that step), and Settings and the group editor go one step above whatever opened them.
+// entry and every other screen (Music, Library, Settings, the group editor) sits one
+// step above it: going from one of those to another replaces that step, so back
+// always lands on Playing, the way tabs work.
 
 export type View = "main" | "browse" | "library" | "settings" | "editor";
-
-/** The screens the tabs switch between; the others are pages you go back from. */
-export const TAB_VIEWS: readonly View[] = ["main", "browse", "library"];
 
 const HASHES: Record<View, string> = {
   main: "",
@@ -20,14 +18,9 @@ const HASHES: Record<View, string> = {
 
 interface ViewState {
   misonosView: View;
-  /** How many app entries sit above the Playing one. */
+  /** How many app entries sit above the Playing one (0 or 1, or more from an older version). */
   depth: number;
 }
-
-export function isTabView(view: View): boolean {
-  return TAB_VIEWS.includes(view);
-}
-
 /** The screen a URL hash names, or null for none (an empty or unknown hash). */
 export function viewFromHash(hash: string): View | null {
   const entry = Object.entries(HASHES).find(([, value]) => value !== "" && value === hash);
@@ -98,8 +91,8 @@ export function useViewHistory() {
       }
       return;
     }
-    if (isTabView(next) && isTabView(current) && current !== "main") write("replace", next, depth);
-    else write("push", next, depth + 1);
+    if (current === "main") write("push", next, depth + 1);
+    else write("replace", next, depth);
     setView(next);
   }, [setView]);
 

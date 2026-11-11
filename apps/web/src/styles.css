@@ -64,96 +64,10 @@ button {
   border-bottom: 1px solid rgba(242, 240, 232, 0.08);
 }
 
-.topbar.compact:not(.main) {
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  padding-top: calc(8px + env(safe-area-inset-top));
-}
-
-.topbar.compact .topbar-back {
-  justify-self: start;
-}
-
-.topbar.compact .eyebrow {
-  margin: 0;
-}
-
-.topbar.compact .topbar-title {
-  font-weight: 700;
-  font-size: 1rem;
-  letter-spacing: 0.4px;
-}
-
 .topbar.compact .topbar-actions {
   display: flex;
   gap: 6px;
   justify-self: end;
-}
-
-.topbar.compact .topbar-back {
-  justify-self: end;
-}
-
-.topbar-status {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.status-dot-btn {
-  background: transparent;
-  border: 0;
-  padding: 4px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-}
-
-.status-dot-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.status-popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  /* The dot sits in the last (right-aligned) topbar column, so anchor the popover
-     to the right edge — anchoring left made it grow rightward off narrow screens.
-     Clamp the width to the viewport so it stays legible on mobile. */
-  right: 0;
-  left: auto;
-  z-index: 80;
-  display: grid;
-  gap: 6px;
-  background: #1f2424;
-  color: #f2f0e8;
-  border: 1px solid rgba(242, 240, 232, 0.18);
-  border-radius: 8px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
-  padding: 10px 12px;
-  font-size: 0.85rem;
-  width: max-content;
-  min-width: 200px;
-  max-width: calc(100vw - 24px);
-}
-
-.status-popover strong {
-  /* A long error message must wrap rather than force the popover off-screen. */
-  overflow-wrap: anywhere;
-}
-
-.status-popover small {
-  color: #aeb4ad;
-}
-
-.status-popover button {
-  margin-top: 2px;
-  background: rgba(145, 211, 196, 0.18);
-  border: 1px solid rgba(145, 211, 196, 0.5);
-  border-radius: 6px;
-  color: #f2f0e8;
-  padding: 6px 10px;
-  font-size: 0.82rem;
-  cursor: pointer;
 }
 
 .topbar-group {
@@ -4232,4 +4146,121 @@ small {
   .mini-player-progress span {
     transition: none;
   }
+}
+
+/* Music's sources as a row of logo buttons, styled like the screen tabs. The chosen
+   source shows its name; the others are logos, dimmed until hovered. */
+.browse-source {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #aeb4ad;
+}
+
+.source-tabs {
+  justify-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid rgba(242, 240, 232, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.source-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 42px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #aeb4ad;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.source-tab .service-icon {
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.source-tab[aria-pressed="false"] .service-icon {
+  opacity: 0.72;
+  filter: saturate(0.5);
+}
+
+.source-tab:hover {
+  color: #f2f0e8;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.source-tab:hover .service-icon {
+  opacity: 1;
+  filter: none;
+}
+
+.source-tab[aria-pressed="true"] {
+  color: #91d3c4;
+  background: rgba(145, 211, 196, 0.16);
+}
+
+.source-tab:focus-visible {
+  outline: 2px solid #91d3c4;
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .source-tab .service-icon {
+    transition: none;
+  }
+}
+
+/* Settings' first row: how the app reaches the speakers, and a way to look for them again. */
+.settings-page > .settings-connection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.settings-connection-text {
+  flex: 1;
+  min-width: 0;
+  color: #d7d2c4;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.settings-connection-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid rgba(242, 240, 232, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f0e8;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.settings-connection-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The gear shows when Settings is open, like a tab. */
+.icon-button.topbar-settings[aria-current="page"] {
+  border-color: rgba(145, 211, 196, 0.5);
+  background: rgba(145, 211, 196, 0.16);
+  color: #91d3c4;
 }

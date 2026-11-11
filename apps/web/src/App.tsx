@@ -1,4 +1,4 @@
-import { ArrowLeft, AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
+import { AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, PlayHistoryChange, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
@@ -14,7 +14,8 @@ import { useDialogs } from "./dialogs.js";
 import { useFavorites, type FavoriteInput } from "./favorites.js";
 import { VuMeter } from "./VuMeter.js";
 import { useLocalPlayer, type LocalTrack } from "./localPlayer.js";
-import { ServiceIcon, SourcePicker } from "./SourcePicker.js";
+import { ServiceIcon, SourcePicker, SourceTabs, type SourceVariant } from "./SourcePicker.js";
+import { useSpotifyProfiles } from "./spotifyProfiles.js";
 import { SpotifySettings } from "./SpotifySettings.js";
 import { YouTubeSettings } from "./YouTubeSettings.js";
 import { describeImport, describeLink, isYouTubeLink } from "./youtube.js";
@@ -31,7 +32,7 @@ import { spotifyLoginOfUri } from "./spotifyLogins.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
 import { MiniPlayer, ViewTabs } from "./Navigation.js";
-import { isTabView, useViewHistory } from "./viewHistory.js";
+import { useViewHistory } from "./viewHistory.js";
 
 const GroupEditor = lazy(() => import("./GroupEditor.js").then((module) => ({ default: module.GroupEditor })));
 const LibraryView = lazy(() => import("./LibraryView.js").then((module) => ({ default: module.LibraryView })));
@@ -74,13 +75,11 @@ export function App() {
   const [pendingGroupEdits, setPendingGroupEdits] = useState<PendingGroupEdit[]>([]);
   const [state, setState] = useState<LoadState>("idle");
   const { view, navigate, goBack } = useViewHistory();
-  const tabView = isTabView(view);
   const [artworkFullscreen, setArtworkFullscreen] = useState(false);
   const [artworkMetaOpen, setArtworkMetaOpen] = useState(true);
   const [vuOpen, setVuOpen] = useState(false);
   const [noChrome, setNoChrome] = useState<boolean>(() => readLocalPref(FULLSCREEN_NO_CHROME_PREF) ?? false);
   const [queueDragReorder, setQueueDragReorder] = useState<boolean>(() => readLocalPref(QUEUE_DRAG_REORDER_PREF) ?? false);
-  const [statusOpen, setStatusOpen] = useState(false);
   const [message, setMessage] = useState("Ready");
   const accessSignedOut = useAccessSignedOut();
   const [searchSlot, setSearchSlot] = useState<HTMLDivElement | null>(null);
@@ -827,8 +826,8 @@ export function App() {
       if (vuOpen) setVuOpen(false);
       else if (artworkFullscreen) setArtworkFullscreen(false);
       else if (volumePopoverOpen) setVolumePopoverOpen(false);
-      // Music and Library have no Back button: Esc goes back to Playing from them.
-      else if (view === "browse" || view === "library") goBack();
+      // No screen has a Back button: Esc goes back to Playing from any of them.
+      else if (view !== "main") goBack();
       else return false;
     },
     "?": () => setShortcutsOpen(true),
@@ -840,63 +839,38 @@ export function App() {
     }
   });
 
-  // On Music and Library, what the room is playing stays in reach (it's the whole screen on Playing).
-  const miniPlayerShown = (view === "browse" || view === "library") && !!effectiveNowPlaying?.title;
+  // Off Playing, what the room is playing stays in reach (on Playing it's the whole screen).
+  const miniPlayerShown = view !== "main" && !!effectiveNowPlaying?.title;
 
   return (
-    <main className={`app-shell${tabView ? " with-tabs" : ""}${miniPlayerShown ? " with-mini-player" : ""}`}>
-      <header className={`topbar ${tabView ? "compact main" : "compact"}`}>
-        {tabView ? (
-          <>
-            <GroupDropdown
-              options={groupOptions}
-              selectedId={selectedGroupId || selectedGroup?.id}
-              selectedOption={selectedGroupOption}
-              onSelect={setSelectedGroupId}
-              onEditGroups={() => navigate("editor")}
-              playback={targetPlayback}
-              onTogglePlay={(groupId, playing) => { if (groupId === LOCAL_DEVICE_ID) localPlayer.toggle(); else void toggleGroupPlayback(groupId, playing ? "pause" : "play"); }}
-              onPauseAll={() => void pauseAllGroups()}
-              onOpen={() => { if (groups.length > 0) void loadGroupPlayback(groups); }}
-            />
-            <div className="topbar-actions">
-              <ViewTabs view={view} onSelect={navigate} />
-              <button className="icon-button" type="button" title="Settings (,)" aria-label="Settings" aria-keyshortcuts="," onClick={() => navigate("settings")}>
-                <Settings size={18} />
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <button className="icon-button topbar-back" type="button" title="Back (Esc)" aria-label="Back" aria-keyshortcuts="Escape" onClick={goBack}>
-              <ArrowLeft size={18} />
-            </button>
-            <span className="topbar-title">{view === "settings" ? "Settings" : "Group Editor"}</span>
-            {view === "settings" ? (
-              <>
-                <p className="eyebrow">MiSonos</p>
-                <div className="topbar-status" onMouseLeave={() => setStatusOpen(false)}>
-                  <button
-                    type="button"
-                    className="status-dot-btn"
-                    aria-label={`Connection status: ${message}`}
-                    title={message}
-                    onClick={() => setStatusOpen((current) => !current)}
-                  >
-                    <span className={`status-dot ${state}`} aria-hidden="true" />
-                  </button>
-                  {statusOpen ? (
-                    <div className="status-popover" role="status">
-                      <strong>{message}</strong>
-                      <small>State: {state}</small>
-                      <button type="button" onClick={() => { void loadSnapshot(true); setStatusOpen(false); }}>Rediscover speakers</button>
-                    </div>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-          </>
-        )}
+    <main className={`app-shell with-tabs${miniPlayerShown ? " with-mini-player" : ""}`}>
+      {/* The same header on every screen, so nothing shifts when Settings or the group editor opens. */}
+      <header className="topbar compact main">
+        <GroupDropdown
+          options={groupOptions}
+          selectedId={selectedGroupId || selectedGroup?.id}
+          selectedOption={selectedGroupOption}
+          onSelect={setSelectedGroupId}
+          onEditGroups={() => navigate("editor")}
+          playback={targetPlayback}
+          onTogglePlay={(groupId, playing) => { if (groupId === LOCAL_DEVICE_ID) localPlayer.toggle(); else void toggleGroupPlayback(groupId, playing ? "pause" : "play"); }}
+          onPauseAll={() => void pauseAllGroups()}
+          onOpen={() => { if (groups.length > 0) void loadGroupPlayback(groups); }}
+        />
+        <div className="topbar-actions">
+          <ViewTabs view={view} onSelect={navigate} />
+          <button
+            className="icon-button topbar-settings"
+            type="button"
+            title={view === "settings" ? "Close settings (,)" : "Settings (,)"}
+            aria-label="Settings"
+            aria-keyshortcuts=","
+            aria-current={view === "settings" ? "page" : undefined}
+            onClick={() => { if (view === "settings") goBack(); else navigate("settings"); }}
+          >
+            <Settings size={18} />
+          </button>
+        </div>
       </header>
 
       {accessSignedOut ? (
@@ -934,6 +908,7 @@ export function App() {
         style={view === "browse" ? undefined : { display: "none" }}
       >
         <SourceBrowser
+          active={view === "browse"}
           selectedGroupId={selectedGroupId || selectedGroup?.id}
           customIcons={customIcons}
           sourcesVersion={sourcesVersion}
@@ -947,6 +922,13 @@ export function App() {
 
       {view === "settings" ? (
         <section className="settings-page" aria-label="Settings">
+          <section className="queue-panel settings-connection" aria-label="Connection">
+            <span className={`status-dot ${state}`} aria-hidden="true" />
+            <span className="settings-connection-text" role="status">{message}</span>
+            <button type="button" className="settings-connection-action" disabled={state === "loading"} onClick={() => void loadSnapshot(true)}>
+              <RefreshCw size={14} aria-hidden="true" /> Rediscover speakers
+            </button>
+          </section>
           <Locations />
           <Preferences
             showDevPanels={showDevPanels}
@@ -1397,6 +1379,8 @@ export function App() {
 }
 
 interface SourceBrowserProps {
+  /** Music is on screen (it stays mounted, hidden, the rest of the time). */
+  active: boolean;
   selectedGroupId?: string;
   customIcons: Record<string, string>;
   sourcesVersion: number;
@@ -1422,7 +1406,7 @@ function BrowseThumb({ src }: { src?: string }) {
   return <img className="browse-thumb" src={artSrc(src)} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function SourceBrowser({ selectedGroupId, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
+function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
   const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>> | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
   const sourceInitializedRef = useRef(false);
@@ -1452,6 +1436,21 @@ function SourceBrowser({ selectedGroupId, customIcons, sourcesVersion, searchSlo
     setSourceId(id);
     setPref(LAST_SOURCE_PREF, id);
   }, []);
+  // Each Sonos Spotify login (Mia, Pepe) is a Spotify button of its own: it picks which
+  // login what's played from Music goes to. Browsing is the same Spotify account either way.
+  const spotifyProfiles = useSpotifyProfiles(active && !!sources?.some((source) => source.id === "spotify"));
+  const spotifyVariants: SourceVariant[] = spotifyProfiles.profiles.map((profile) => ({
+    key: profile.key,
+    label: profile.label,
+    title: profile.title,
+    selected: profile.key === spotifyProfiles.selectedKey,
+    onSelect: () => {
+      if (profile.key === spotifyProfiles.selectedKey) return;
+      spotifyProfiles.choose(profile).catch((err: unknown) => {
+        setStatus({ ok: false, message: err instanceof Error ? err.message : "Couldn't switch the Spotify login" });
+      });
+    }
+  }));
   const [stack, setStack] = useState<BrowseCrumb[]>([]);
   const crumbsRef = useRef<HTMLElement | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -1844,15 +1843,16 @@ function SourceBrowser({ selectedGroupId, customIcons, sourcesVersion, searchSlo
     <section className="queue-panel" aria-label="Source browser">
 
       <div className="browse-controls">
-        <label>
+        <div className="browse-source">
           <span>Source</span>
-          <SourcePicker
+          <SourceTabs
             sources={sources ?? []}
             value={sourceId}
             onChange={(id) => { persistSourceId(id); setStack([]); clearSearch(); }}
             customIcons={customIcons}
+            variants={spotifyVariants.length > 0 ? { spotify: spotifyVariants } : undefined}
           />
-        </label>
+        </div>
       </div>
       {searchSlot ? createPortal(
         <>
