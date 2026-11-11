@@ -18,7 +18,9 @@ import { ServiceIcon, SourcePicker, SourceTabs, type SourceVariant } from "./Sou
 import { useSpotifyProfiles } from "./spotifyProfiles.js";
 import { SpotifySettings } from "./SpotifySettings.js";
 import { YouTubeSettings } from "./YouTubeSettings.js";
-import { describeImport, describeLink, isYouTubeLink } from "./youtube.js";
+import { describeImport, isYouTubeLink } from "./youtube.js";
+import { useYouTubeLink } from "./useYouTubeLink.js";
+import { YouTubeLinkPanel } from "./YouTubeLinkPanel.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
@@ -910,6 +912,7 @@ export function App() {
         <SourceBrowser
           active={view === "browse"}
           selectedGroupId={selectedGroupId || selectedGroup?.id}
+          selectedGroupName={selectedGroupOption?.name}
           customIcons={customIcons}
           sourcesVersion={sourcesVersion}
           searchSlot={searchSlot}
@@ -1382,6 +1385,8 @@ interface SourceBrowserProps {
   /** Music is on screen (it stays mounted, hidden, the rest of the time). */
   active: boolean;
   selectedGroupId?: string;
+  /** The picked room's name as the room picker shows it, for "Plays it on …". */
+  selectedGroupName?: string;
   customIcons: Record<string, string>;
   sourcesVersion: number;
   /** Where the search box goes: a slot on the main screen, present while it shows. */
@@ -1406,7 +1411,7 @@ function BrowseThumb({ src }: { src?: string }) {
   return <img className="browse-thumb" src={artSrc(src)} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
+function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
   const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>> | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
   const sourceInitializedRef = useRef(false);
@@ -1538,50 +1543,25 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
   const supportsSearch = activeSource?.capabilities?.includes("search") ?? false;
   const supportsTypedSearch = sourceId === "youtube-music";
 
-  // A pasted YouTube link is got from YouTube (Downtify downloads it into Navidrome)
-  // instead of searched for, and plays on the picked room.
+  // A pasted YouTube link isn't searched for: YouTubeLinkPanel, under the box, plays it
+  // (streamed, saved nowhere) or downloads it into Navidrome, on the picked room.
   const [youtube, setYoutube] = useState<YouTubeImportStatus | null>(null);
-  const [youtubeNote, setYoutubeNote] = useState("");
   useEffect(() => {
     void bridgeApi.youtubeStatus().then(setYoutube).catch(() => setYoutube(null));
   }, [sourcesVersion]);
   const queryIsYouTube = Boolean(youtube?.available) && isYouTubeLink(searchQuery);
   // "This device" isn't a Sonos room: the songs are then only saved to the playlist.
   const youtubeGroupId = selectedGroupId && selectedGroupId !== LOCAL_DEVICE_ID ? selectedGroupId : undefined;
-  const changeQuery = (value: string) => {
-    setSearchQuery(value);
-    setYoutubeNote("");
-  };
-  const getFromYouTube = useCallback(async () => {
-    if (!youtube?.paired) {
-      setYoutubeNote("Pair MiSonos with Downtify in Settings → YouTube links first.");
-      return;
-    }
-    try {
-      onYouTubeJob(await bridgeApi.importYouTube({ url: searchQuery.trim(), groupId: youtubeGroupId }));
-      setSearchQuery("");
-      setYoutubeNote("");
-    } catch (err) {
-      setYoutubeNote(err instanceof Error ? err.message : "Couldn't start the download");
-    }
-  }, [youtube?.paired, searchQuery, youtubeGroupId, onYouTubeJob]);
-  const youtubeLine = youtubeNote
-    ? { text: youtubeNote, tone: "error", dismissable: false }
-    : queryIsYouTube
-      ? {
-          text: !youtube?.paired
-            ? "Pair MiSonos with Downtify in Settings → YouTube links to get songs from YouTube."
-            : describeLink(searchQuery, { play: Boolean(youtubeGroupId), playlist: youtube.playlist, mixSongs: youtube.mixSongs }),
-          tone: "hint",
-          dismissable: false
-        }
-      : youtubeJob
-        ? {
-            text: describeImport(youtubeJob, youtube?.playlist ?? "YouTube"),
-            tone: youtubeJob.status === "failed" ? "error" : "info",
-            dismissable: youtubeJob.status === "done" || youtubeJob.status === "failed"
-          }
-        : null;
+  const changeQuery = (value: string) => setSearchQuery(value);
+  const clearQuery = useCallback(() => setSearchQuery(""), [setSearchQuery]);
+  // How the latest download is going, once the box no longer holds its link.
+  const youtubeLine = !queryIsYouTube && youtubeJob
+    ? {
+        text: describeImport(youtubeJob, youtube?.playlist ?? "YouTube"),
+        tone: youtubeJob.status === "failed" ? "error" : "info",
+        dismissable: youtubeJob.status === "done" || youtubeJob.status === "failed"
+      }
+    : null;
   const youtubeLineView = youtubeLine ? (
     <p className={`youtube-import-line ${youtubeLine.tone}`} role="status">
       <span>{youtubeLine.text}</span>
@@ -1628,6 +1608,15 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
       });
     }
   }, [sourceId, pinnedIds]);
+
+  const youtubeLink = useYouTubeLink({
+    url: queryIsYouTube ? searchQuery.trim() : "",
+    status: youtube,
+    groupId: youtubeGroupId,
+    groupName: youtubeGroupId ? selectedGroupName : undefined,
+    onJob: onYouTubeJob,
+    onStarted: clearQuery
+  });
 
   const runSearch = useCallback(async (overrideType?: "song" | "artist" | "album") => {
     const query = searchQuery.trim();
@@ -1863,7 +1852,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
           onSubmit={(event) => {
             event.preventDefault();
             if (queryIsYouTube) {
-              void getFromYouTube();
+              void youtubeLink.submit();
               return;
             }
             if (!supportsSearch || !searchQuery.trim()) return;
@@ -1898,6 +1887,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
             <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
           ) : null}
         </form>
+        <YouTubeLinkPanel controller={youtubeLink} />
         {youtubeLineView}
         </>,
         searchSlot
@@ -1910,7 +1900,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              if (queryIsYouTube) void getFromYouTube();
+              if (queryIsYouTube) void youtubeLink.submit();
               else void runSearch();
             }}
             style={{ display: "flex", gap: 6 }}
@@ -1928,6 +1918,7 @@ function SourceBrowser({ active, selectedGroupId, customIcons, sourcesVersion, s
               <button type="button" onClick={clearSearch} className="browse-search-clear">Clear</button>
             ) : null}
           </form>
+          <YouTubeLinkPanel controller={youtubeLink} />
           {youtubeLineView}
           {supportsTypedSearch ? (
             <div className="browse-search-types" role="tablist">

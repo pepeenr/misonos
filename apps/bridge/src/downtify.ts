@@ -18,10 +18,20 @@ export interface DowntifySong {
   song_id?: string;
   name?: string;
   artists?: string[];
+  /** The artist whose folder the song is filed in, when it isn't the first one. */
+  album_artist?: string;
   album_name?: string;
   /** Seconds. */
   duration?: number;
   url?: string;
+  /** Whatever else Downtify resolved (cover, year, …): a named download sends it back. */
+  [detail: string]: unknown;
+}
+
+/** An artist and title to save a song under instead of YouTube's. */
+export interface SongNames {
+  artist?: string;
+  title?: string;
 }
 
 export interface DowntifyPairing {
@@ -64,16 +74,16 @@ export class DowntifyClient {
     return result.tracks ?? [];
   }
 
-  /** Downloads `song`, and answers with its file name once it's on disk. */
-  download(song: DowntifySong): Promise<string> {
+  /**
+   * Downloads `song`, under `names` when given, and answers with its file name once
+   * it's on disk.
+   */
+  download(song: DowntifySong, names?: SongNames): Promise<string> {
     const videoId = song.song_id && VIDEO_ID.test(song.song_id) ? song.song_id : undefined;
     const url = song.url || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
     const query = new URLSearchParams({ url, client_id: "misonos" });
-    // youtube_id pins the video itself, so Downtify doesn't match it to another upload.
-    // No playlist_name: Downtify's playlists only take songs with a Spotify id, so a
-    // YouTube song never reached its M3U. The bridge keeps the playlist in Navidrome.
     return this.call<string>("POST", `/api/download/url?${query}`, {
-      body: videoId ? { youtube_id: videoId } : {},
+      body: downloadBody(song, videoId, names),
       timeoutMs: DOWNLOAD_TIMEOUT_MS
     });
   }
@@ -121,6 +131,34 @@ export class DowntifyClient {
       request.end(body);
     });
   }
+}
+
+/**
+ * The body of Downtify's POST /api/download/url.
+ *
+ * Plain: `youtube_id` pins the video itself, so Downtify doesn't match it to another
+ * upload, and Downtify names and tags the file from the video's own details. No
+ * playlist_name: Downtify's playlists only take songs with a Spotify id, so a YouTube
+ * song never reached its M3U. The bridge keeps the playlist in Navidrome.
+ *
+ * Named: a body with `source: "text_search"` is taken as the song itself (that's how
+ * Downtify's own free-text search rows arrive, Downtify 3.10), so the file is named and
+ * tagged from the artist and title given here. `album_artist` names the artist's folder.
+ * `youtube_id` still pins this exact video.
+ */
+export function downloadBody(song: DowntifySong, videoId: string | undefined, names?: SongNames): Record<string, unknown> {
+  const artist = names?.artist?.trim();
+  const title = names?.title?.trim();
+  if (!artist && !title) return videoId ? { youtube_id: videoId } : {};
+  if (!videoId) throw new DowntifyError("Only a YouTube video can be saved under a name of its own", 400);
+  return {
+    ...song,
+    source: "text_search",
+    youtube_id: videoId,
+    name: title || song.name,
+    artists: artist ? [artist] : song.artists,
+    album_artist: artist || song.album_artist
+  };
 }
 
 // FastAPI's errors: {"detail": "…"}, or a list of {msg} for a bad request.
