@@ -1,5 +1,4 @@
 import { useCallback, useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { SETTINGS_COLLAPSED_PREF, readLocalPref, setLocalPref } from "./prefs.js";
 
@@ -24,6 +23,8 @@ interface SettingsSectionProps {
   label?: string;
   /** Buttons on the right of the title (refresh, add). Clicking one doesn't toggle. */
   actions?: ReactNode;
+  /** A class for the box that holds the content. */
+  bodyClassName?: string;
   children: ReactNode;
 }
 
@@ -31,14 +32,14 @@ interface SettingsSectionProps {
  * A Settings section with a title that folds it away. The content stays mounted while
  * folded (just hidden), so a section keeps what it loaded and what's typed in it.
  */
-export function SettingsSection({ id, title, label, actions, children }: SettingsSectionProps) {
+export function SettingsSection({ id, title, label, actions, bodyClassName, children }: SettingsSectionProps) {
   const [collapsed, toggle] = useCollapsed(id);
   return (
     <section className="queue-panel" aria-label={label ?? title}>
       <CollapsibleHeading title={title} collapsed={collapsed} onToggle={toggle} what={`the ${title.toLowerCase()} section`}>
         {actions}
       </CollapsibleHeading>
-      <div hidden={collapsed}>{children}</div>
+      <div className={bodyClassName} hidden={collapsed}>{children}</div>
     </section>
   );
 }
@@ -50,24 +51,14 @@ interface SettingsCardProps {
   children: ReactNode;
 }
 
-/** The same fold for the smaller Settings cards (YouTube Music, Spotify, YouTube links). */
+/**
+ * A Settings section whose content is laid out as a card's: a column of help text, rows
+ * and buttons (YouTube Music, Spotify, YouTube links). It looks and folds like the others.
+ */
 export function SettingsCard({ id, title, label, children }: SettingsCardProps) {
-  const [collapsed, toggle] = useCollapsed(id);
   return (
-    <section className={collapsed ? "settings-card collapsed" : "settings-card"} aria-label={label}>
-      <h3>
-        <button
-          type="button"
-          className="section-toggle"
-          aria-expanded={!collapsed}
-          title={`${collapsed ? "Show" : "Hide"} the ${title.toLowerCase()} section`}
-          onClick={toggle}
-        >
-          <ChevronDown size={16} className="section-toggle-icon" aria-hidden="true" />
-          {title}
-        </button>
-      </h3>
-      <div className="settings-card-body" hidden={collapsed}>{children}</div>
-    </section>
+    <SettingsSection id={id} title={title} label={label} bodyClassName="settings-card-body">
+      {children}
+    </SettingsSection>
   );
 }

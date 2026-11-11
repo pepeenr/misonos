@@ -552,22 +552,7 @@ h2 {
   padding: 14px;
 }
 
-.settings-card {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid rgba(242, 240, 232, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.settings-card h3 {
-  margin: 0;
-  font-size: 1rem;
-}
-
-/* The card's content sits in its own box so a fold can hide it; it lays out the way the
-   card's own children did. */
+/* A SettingsCard's content: a column of help text, rows and buttons. */
 .settings-card-body {
   display: grid;
   gap: 10px;
@@ -636,7 +621,7 @@ h2 {
   resize: vertical;
 }
 
-.settings-card button {
+.settings-card-body button {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(242, 240, 232, 0.18);
   border-radius: 6px;
@@ -647,7 +632,7 @@ h2 {
   cursor: pointer;
 }
 
-.settings-card button:disabled {
+.settings-card-body button:disabled {
   opacity: 0.5;
   cursor: default;
 }
