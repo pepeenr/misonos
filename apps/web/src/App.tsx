@@ -20,6 +20,7 @@ import { SpotifySettings } from "./SpotifySettings.js";
 import { YouTubeSettings } from "./YouTubeSettings.js";
 import { describeImport, isYouTubeLink } from "./youtube.js";
 import { useYouTubeLink } from "./useYouTubeLink.js";
+import { useAppUpdate } from "./appUpdate.js";
 import { YouTubeLinkPanel } from "./YouTubeLinkPanel.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
@@ -96,6 +97,7 @@ export function App() {
     forgetPlaylists();
     setPlaylistsReload((count) => count + 1);
   }, [youtubeAdded, youtubeJob?.id]);
+  const appUpdate = useAppUpdate();
   const [recentNudge, setRecentNudge] = useState<{ id: number; title: string; itemCount: number } | null>(null);
   const processedNudgeTokenRef = useRef<string | null>(null);
   const pendingNudgeRef = useRef<{ token: string; timer: number } | null>(null);
@@ -874,6 +876,20 @@ export function App() {
           </button>
         </div>
       </header>
+
+      {appUpdate.ready ? (
+        <div className="restore-nudge" role="status">
+          <span className="restore-nudge-text">A new version of MiSonos is ready.</span>
+          <div className="restore-nudge-actions">
+            <button type="button" className="restore-nudge-restore" onClick={appUpdate.reload}>
+              <RefreshCw size={14} /> Reload
+            </button>
+            <button type="button" className="restore-nudge-dismiss" aria-label="Not now" title="Not now: it loads next time MiSonos opens" onClick={appUpdate.dismiss}>
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {accessSignedOut ? (
         <div className="restore-nudge" role="alert">
