@@ -19,6 +19,8 @@ interface PlaylistsPanelProps {
   customIcons: Record<string, string>;
   /** Bumped when a playlist changed elsewhere (a YouTube link added songs): load the list again. */
   reloadKey?: number;
+  /** Library's search text, lowercased: only playlists whose name has it show. */
+  filter?: string;
 }
 
 // Tiles shown before "Show all": about two rows on a wide screen.
@@ -35,9 +37,9 @@ function PlaylistArt({ src, title }: { src?: string; title: string }) {
   return <img src={artSrc(src)} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-// The main screen's grid of the chosen source's playlists. A tile replaces the queue
-// with the playlist and plays it.
-export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleCollapsed, onPlayed, customIcons, reloadKey = 0 }: PlaylistsPanelProps) {
+// Library's grid of the chosen source's playlists (Settings → Preferences picks the
+// source), next to MiSonos's own. A tile replaces the queue with the playlist and plays it.
+export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleCollapsed, onPlayed, customIcons, reloadKey = 0, filter = "" }: PlaylistsPanelProps) {
   const { source, folderId } = entry;
   const cacheKey = `${source.id}:${folderId}`;
   const localPlayer = useLocalPlayer();
@@ -109,10 +111,12 @@ export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleC
     }
   }, [groupId, localMode, localPlayer, onPlayed, source.id, source.name, sonosOnly]);
 
-  const shown = playlists ? (showAll ? playlists : playlists.slice(0, PREVIEW_COUNT)) : [];
+  // While searching, every match shows; otherwise the first rows until "Show all".
+  const matching = playlists && filter ? playlists.filter((item) => item.title.toLowerCase().includes(filter)) : playlists;
+  const shown = matching ? (showAll || filter ? matching : matching.slice(0, PREVIEW_COUNT)) : [];
 
   return (
-    <section className="queue-panel playlists-panel" aria-label="Playlists">
+    <section className="queue-panel playlists-panel" aria-label={`${source.name} playlists`}>
       <CollapsibleHeading title="Playlists" collapsed={collapsed} onToggle={onToggleCollapsed} shortcut="Shift+L" what="playlists">
         <span className="playlists-source">
           <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
@@ -143,9 +147,11 @@ export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleC
             <div className="empty-panel">Loading playlists…</div>
           ) : playlists.length === 0 ? (
             <div className="empty-panel">No playlists in {source.name}.</div>
+          ) : shown.length === 0 ? (
+            <div className="empty-panel">No {source.name} playlists match.</div>
           ) : (
             <>
-              <div className={showAll ? "presets-grid playlists-grid all" : "presets-grid playlists-grid"}>
+              <div className={showAll && !filter ? "presets-grid playlists-grid all" : "presets-grid playlists-grid"}>
                 {shown.map((item, index) => {
                   const key = index < 9 ? String(index + 1) : undefined;
                   return (
@@ -166,7 +172,7 @@ export function PlaylistsPanel({ entry, groupId, localMode, collapsed, onToggleC
                   );
                 })}
               </div>
-              {playlists.length > PREVIEW_COUNT ? (
+              {!filter && playlists.length > PREVIEW_COUNT ? (
                 <button type="button" className="playlists-more" onClick={() => setShowAll((current) => !current)}>
                   {showAll ? "Show fewer" : `Show all ${playlists.length}`}
                 </button>

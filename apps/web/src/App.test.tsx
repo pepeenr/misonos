@@ -32,6 +32,11 @@ class FakeEventSource {
   }
 }
 
+// Library's own lists (MiSonos playlists, favorites, recents): empty in these tests.
+function libraryLists(url: string): boolean {
+  return /\/api\/(playlists|favorites|recently-played|sources\/settings)(\?|$)/.test(url) || url.endsWith("/recent-queues");
+}
+
 describe("App", () => {
   beforeEach(() => {
     vi.stubGlobal("EventSource", FakeEventSource);
@@ -75,7 +80,7 @@ describe("App", () => {
     expect(await screen.findByRole("slider", { name: "Playback progress (drag to seek)" })).toBeInTheDocument();
   });
 
-  it("collapses the queue and plays a playlist from the grid, by click or key", async () => {
+  it("collapses the queue, and plays a Navidrome playlist from Library's grid by click or key", async () => {
     window.localStorage.clear();
     const plays: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -95,13 +100,14 @@ describe("App", () => {
       }
       if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", position: "0:01:07", duration: "0:04:04", updatedAt: new Date().toISOString() });
       if (url.endsWith("/queue")) return json([{ id: "q1", title: "Song" }]);
+      if (libraryLists(url)) return json([]);
       return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
     }));
     const { container } = render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
 
-    const tile = await screen.findByRole("button", { name: "Play Road Trip" });
-    expect(tile).toHaveAttribute("aria-keyshortcuts", "1");
     await waitFor(() => expect(container.querySelector(".queue-list")).not.toBeNull());
+    // The source's playlists live in Library now, not under the queue.
+    expect(screen.queryByRole("region", { name: "Navidrome playlists" })).toBeNull();
 
     const queueToggle = screen.getByRole("button", { name: "Queue" });
     fireEvent.click(queueToggle);
@@ -116,6 +122,15 @@ describe("App", () => {
     fireEvent.click(queueHeading);
     expect(queueToggle).toHaveAttribute("aria-expanded", "true");
 
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Screens" })).getByRole("button", { name: /Library/ }));
+    const tile = await screen.findByRole("button", { name: "Play Road Trip" });
+    expect(tile).toHaveAttribute("aria-keyshortcuts", "1");
+    // MiSonos's own playlists sit beside them, told apart by their label, with the count
+    // where the main screen's cards have theirs.
+    const own = screen.getByRole("region", { name: "MiSonos playlists" });
+    expect(within(own).getByText("MiSonos")).toBeInTheDocument();
+    expect(within(own).getByText("0").closest(".heading-actions")).not.toBeNull();
+
     fireEvent.click(tile);
     await waitFor(() => expect(plays).toHaveLength(1));
     expect(plays[0]).toMatchObject({ trackIds: ["t1", "t2"], groupId: "g1", mode: "replace" });
@@ -123,13 +138,59 @@ describe("App", () => {
     fireEvent.keyDown(document.body, { key: "1", code: "Digit1" });
     await waitFor(() => expect(plays).toHaveLength(2));
 
-    const playlistsToggle = screen.getByRole("button", { name: "Playlists" });
+    const playlistsToggle = within(screen.getByRole("region", { name: "Navidrome playlists" })).getByRole("button", { name: "Playlists" });
     fireEvent.click(screen.getByRole("button", { name: "Refresh playlists" }));
     expect(playlistsToggle).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(playlistsToggle.closest(".section-heading")!.querySelector(".playlists-source")!);
     expect(playlistsToggle).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(playlistsToggle);
     expect(playlistsToggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens Music's top-level folders in place, and keeps them open after a look inside", async () => {
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
+      if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
+      if (url.endsWith("/api/sources")) return json([{ id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] }]);
+      if (url.endsWith("/api/sources/navidrome/browse")) {
+        return json({ id: "root", total: 2, items: [{ id: "artists", title: "Artists", kind: "container" }, { id: "playlists", title: "Playlists", kind: "container" }] });
+      }
+      if (url.endsWith("/browse?id=playlists")) return json({ id: "playlists", total: 1, items: [{ id: "pl:1", title: "Road Trip", kind: "album" }] });
+      if (url.endsWith("/browse?id=pl%3A1")) {
+        return json({ id: "pl:1", total: 2, items: [{ id: "t1", title: "One", kind: "playable" }, { id: "t2", title: "Two", kind: "playable" }] });
+      }
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      if (libraryLists(url)) return json([]);
+      return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "Screens" })).getByRole("button", { name: /Music/ }));
+
+    const browser = within(await screen.findByRole("region", { name: "Source browser" }));
+    const playlists = await browser.findByRole("button", { name: "Playlists" });
+    expect(playlists).toHaveAttribute("aria-expanded", "false");
+    expect(browser.getByRole("button", { name: "Artists" })).toHaveAttribute("aria-expanded", "false");
+
+    // It opens where it is, with its count on the right, like the cards elsewhere.
+    fireEvent.click(playlists);
+    const roadTrip = await browser.findByRole("button", { name: "Road Trip" });
+    expect(playlists).toHaveAttribute("aria-expanded", "true");
+    expect(playlists.closest(".section-heading")!.querySelector(".heading-actions > span")).toHaveTextContent("1");
+    expect(browser.getByRole("button", { name: "Artists" })).toHaveAttribute("aria-expanded", "false");
+
+    // A playlist in it opens as its own list, its path starting at the folder.
+    fireEvent.click(roadTrip);
+    expect(await browser.findByText("One")).toBeInTheDocument();
+    const path = within(browser.getByRole("navigation", { name: "Path" }));
+    expect(path.getByRole("button", { name: "Playlists" })).toBeInTheDocument();
+    expect(path.getByRole("button", { name: "Road Trip" })).toBeInTheDocument();
+
+    // Back at the top, the folder is still open, and it stays open next time.
+    fireEvent.click(path.getByRole("button", { name: "Return to root" }));
+    expect(await browser.findByRole("button", { name: "Road Trip" })).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("misonos.music.openFolders") ?? "{}")).toEqual({ "navidrome:root": ["playlists"] });
   });
 
   it("searches from the main screen and shows the results in Music", async () => {
@@ -228,12 +289,18 @@ describe("App", () => {
       }
       if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
       if (url.endsWith("/queue")) return json([]);
+      if (libraryLists(url)) return json([]);
       return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
     }));
     render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+    const screens = within(await screen.findByRole("navigation", { name: "Screens" }));
+
+    // Library has shown the Navidrome playlists once; then back to Playing.
+    fireEvent.click(screens.getByRole("button", { name: /Library/ }));
+    await screen.findByRole("button", { name: "Play Road Trip" });
+    fireEvent.click(screens.getByRole("button", { name: /Playing/ }));
 
     const box = await screen.findByRole("searchbox", { name: "Search Navidrome" });
-    await screen.findByRole("button", { name: "Play Road Trip" });
     await waitFor(() => expect(box).toHaveAttribute("placeholder", "Search Navidrome or paste a YouTube link"));
     const card = within(box.closest(".main-search") as HTMLElement);
     fireEvent.change(box, { target: { value: "https://youtu.be/aaaaaaaaaaa" } });
@@ -262,10 +329,12 @@ describe("App", () => {
       }
     }));
     expect(card.getByRole("status")).toHaveTextContent("Playing “Ripple”.");
-    // The song is in the YouTube playlist now, so the playlists card loaded its list again.
-    await waitFor(() => expect(playlistLoads).toBeGreaterThan(loadsBefore));
     fireEvent.click(card.getByRole("button", { name: "Dismiss" }));
     expect(card.queryByRole("status")).toBeNull();
+    // The song is in the YouTube playlist now, so Library loads the playlists again.
+    fireEvent.click(screens.getByRole("button", { name: /Library/ }));
+    await screen.findByRole("button", { name: "Play Road Trip" });
+    await waitFor(() => expect(playlistLoads).toBeGreaterThan(loadsBefore));
   });
 
   it("shows a volume change pushed by the bridge without waiting for the next poll", async () => {

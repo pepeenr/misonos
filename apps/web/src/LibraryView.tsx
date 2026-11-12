@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { ArrowLeft, ChevronUp, ChevronDown, ListEnd, ListPlus, Play, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import type { Favorite, Playlist, PlaylistItem, PlaybackMode, RecentlyPlayedItem, RecentQueue, SonosGroup, SourceSetting } from "@misonos/sonos-protocol";
 import { artSrc, bridgeApi } from "./api.js";
+import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { GroupDropdown } from "./GroupDropdown.js";
 import { buildGroupOptions } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
@@ -15,11 +16,13 @@ interface LibraryViewProps {
   onSelectGroup: (groupId: string) => void;
   /** Show a room picker of its own; otherwise the app's room menu picks where it plays. */
   showGroupPicker?: boolean;
+  /** A music source's playlists (Navidrome's), after MiSonos's own; given the search text. */
+  renderSourcePlaylists?: (query: string) => ReactNode;
 }
 
 type OpenPlaylist = { playlist: Playlist; items: PlaylistItem[] };
 
-export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupPicker = true }: LibraryViewProps) {
+export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupPicker = true, renderSourcePlaylists }: LibraryViewProps) {
   const dialogs = useDialogs();
   const favs = useFavorites();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -375,21 +378,24 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
     );
   }
 
+  // Each section is a card of its own, like the main screen's queue and history.
   return (
-    <section className="queue-panel library" aria-label="Library">
-      <div className="section-heading"><h2>Library</h2>{groupSelect}</div>
-      {status ? <div className={status.ok ? "service-result ok" : "service-result error"}>{status.message}</div> : null}
+    <>
+      <section className="queue-panel library" aria-label="Library">
+        <div className="section-heading"><h2>Library</h2>{groupSelect}</div>
+        {status ? <div className={status.ok ? "service-result ok" : "service-result error"}>{status.message}</div> : null}
 
-      <input
-        className="library-search"
-        type="search"
-        placeholder="Search favorites and playlists…"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-      />
+        <input
+          className="library-search"
+          type="search"
+          placeholder="Search favorites and playlists…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </section>
 
       {recentQueues.length > 0 ? (
-        <CollapsibleSection title="Recent queues" count={recentQueues.length} open={!collapsed.recentQueues} onToggle={() => toggleSection("recentQueues")}>
+        <LibraryCard title="Recent queues" count={recentQueues.length} collapsed={!!collapsed.recentQueues} onToggle={() => toggleSection("recentQueues")}>
           {filteredRecentQueues.length === 0 ? (
             <div className="empty-panel">No recent queues match “{query.trim()}”.</div>
           ) : (
@@ -411,11 +417,11 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
               ))}
             </ul>
           )}
-        </CollapsibleSection>
+        </LibraryCard>
       ) : null}
 
       {recentlyPlayed.length > 0 ? (
-        <CollapsibleSection title="Recently played" count={recentlyPlayed.length} open={!collapsed.recentlyPlayed} onToggle={() => toggleSection("recentlyPlayed")}>
+        <LibraryCard title="Recently played" count={recentlyPlayed.length} collapsed={!!collapsed.recentlyPlayed} onToggle={() => toggleSection("recentlyPlayed")}>
           <div className="library-playlist-actions">
             <button type="button" title="Play all recently played as a queue" disabled={busy} onClick={() => void playAllRecentlyPlayed("replace")}>
               <Play size={15} /> Play all
@@ -452,10 +458,10 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
               ))}
             </ul>
           )}
-        </CollapsibleSection>
+        </LibraryCard>
       ) : null}
 
-      <CollapsibleSection title="Favorites" count={favs.favorites.length} open={!collapsed.favorites} onToggle={() => toggleSection("favorites")}>
+      <LibraryCard title="Favorites" count={favs.favorites.length} collapsed={!!collapsed.favorites} onToggle={() => toggleSection("favorites")}>
         {favs.favorites.length === 0 ? (
           <div className="empty-panel">No favorites yet. Tap the ⋯ menu on a track or album to favorite it.</div>
         ) : favoritesByProvider.length === 0 ? (
@@ -494,9 +500,16 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
             </div>
           ))
         )}
-      </CollapsibleSection>
+      </LibraryCard>
 
-      <CollapsibleSection title="Playlists" count={playlists.length} open={!collapsed.playlists} onToggle={() => toggleSection("playlists")}>
+      <LibraryCard
+        title="Playlists"
+        label={<span className="playlists-source"><img className="service-icon" src="/favicon.png" alt="" aria-hidden="true" />MiSonos</span>}
+        what="MiSonos playlists"
+        count={playlists.length}
+        collapsed={!!collapsed.playlists}
+        onToggle={() => toggleSection("playlists")}
+      >
         <div className="add-to-playlist-new">
           <input type="text" placeholder="New playlist name…" value={newName} maxLength={60} disabled={busy}
             onChange={(event) => setNewName(event.target.value)}
@@ -531,32 +544,36 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
             ))}
           </ul>
         )}
-      </CollapsibleSection>
-    </section>
+      </LibraryCard>
+
+      {renderSourcePlaylists?.(trimmedQuery)}
+    </>
   );
 }
 
 const LIBRARY_COLLAPSE_KEY = "misonos.library.collapsed";
 
-// A Library top-level section with a click-to-collapse header. Sections are
-// independent (collapse Favorites to focus on Playlists, etc.); add future sections
-// — e.g. Recently played, radio Presets — by dropping another <CollapsibleSection>.
-function CollapsibleSection({ title, count, open, onToggle, children }: {
+// A Library section: a card of its own with the main screen's collapsing title
+// (CollapsibleHeading), so its chevron and count look the same here as there.
+function LibraryCard({ title, label, what, count, collapsed, onToggle, children }: {
   title: string;
+  /** Beside the count: whose section it is, e.g. the MiSonos logo on its playlists. */
+  label?: ReactNode;
+  /** What the toggle's tooltip shows or hides; the title by default. */
+  what?: string;
   count?: number;
-  open: boolean;
+  collapsed: boolean;
   onToggle: () => void;
   children: ReactNode;
 }) {
   return (
-    <div className={`library-section${open ? "" : " collapsed"}`}>
-      <button type="button" className="library-section-header" aria-expanded={open} onClick={onToggle}>
-        <ChevronDown size={16} className={`library-section-chevron${open ? " open" : ""}`} aria-hidden="true" />
-        <h3>{title}</h3>
-        {typeof count === "number" ? <span className="library-section-count">{count}</span> : null}
-      </button>
-      {open ? children : null}
-    </div>
+    <section className="queue-panel library-card" aria-label={what ? what[0].toUpperCase() + what.slice(1) : title}>
+      <CollapsibleHeading title={title} collapsed={collapsed} onToggle={onToggle} what={what ?? title.toLowerCase()}>
+        {label}
+        {typeof count === "number" ? <span>{count}</span> : null}
+      </CollapsibleHeading>
+      {collapsed ? null : children}
+    </section>
   );
 }
 
