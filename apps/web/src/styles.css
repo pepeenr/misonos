@@ -223,7 +223,7 @@ button {
 
 .controller-grid.main-view {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "now" "search" "presets" "queue" "playlists" "history";
+  grid-template-areas: "now" "search" "presets" "queue" "history";
 }
 
 /* Music's search box, as a card on the main screen (rendered by SourceBrowser). */
@@ -1737,10 +1737,6 @@ h2 {
   -webkit-line-clamp: 2;
 }
 
-.queue-panel.playlists-panel {
-  grid-area: playlists;
-}
-
 .playlists-body {
   display: grid;
   gap: 10px;
@@ -2271,6 +2267,40 @@ h2 {
 
 .section-toggle[aria-expanded="false"] .section-toggle-icon {
   transform: rotate(-90deg);
+}
+
+/* A section inside a card (Music's folders): a row of its own that opens in place,
+   with the card titles' chevron and count. */
+.section-heading.toggles.row {
+  margin: 0;
+  padding: 8px 12px 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.section-heading.toggles.row.collapsed {
+  margin: 0;
+  padding-bottom: 8px;
+}
+
+.section-heading.row h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.browse-folder {
+  display: grid;
+  gap: 6px;
+}
+
+.browse-folder > .browse-list.nested {
+  overflow: visible;
+  max-height: none;
+  padding-right: 0;
+}
+
+.browse-folder > .browse-bulk {
+  margin: 0;
 }
 
 .heading-leading {
@@ -3585,55 +3615,7 @@ small {
   cursor: default;
 }
 
-/* Library (favorites + playlists) */
-.library .library-section {
-  margin-top: 16px;
-}
-
-.library .library-section h3 {
-  margin: 0;
-  font-size: 0.95rem;
-  color: #d7d2c4;
-}
-
-.library-section-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 0;
-  margin-bottom: 8px;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.library-section.collapsed .library-section-header {
-  margin-bottom: 0;
-}
-
-.library-section-chevron {
-  color: #91d3c4;
-  transition: transform 0.15s ease;
-  transform: rotate(-90deg); /* collapsed: pointing right */
-}
-
-.library-section-chevron.open {
-  transform: rotate(0deg); /* expanded: pointing down */
-}
-
-.library-section-count {
-  margin-left: auto;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: rgba(145, 211, 196, 0.15);
-  color: #91d3c4;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
+/* Library: a card per section (LibraryCard), titled like the main screen's cards. */
 .library-group {
   display: flex;
   align-items: center;

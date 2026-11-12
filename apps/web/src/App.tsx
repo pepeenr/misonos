@@ -1,5 +1,5 @@
 import { AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
-import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, PlayHistoryChange, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
@@ -29,6 +29,8 @@ import { forgetPlaylists, pickPlaylistSource, usePlaylistSources, type PlaylistS
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { SettingsSection } from "./SettingsSection.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
+import { BrowseFolder } from "./BrowseFolder.js";
+import { readOpenFolders, saveOpenFolders } from "./musicFolders.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { SpotifyNowPlaying } from "./SpotifyNowPlaying.js";
 import { spotifyLoginOfUri } from "./spotifyLogins.js";
@@ -1022,6 +1024,20 @@ export function App() {
               // The room menu up top picks the room, unless it's on "This device",
               // which the library can't play to: then it needs its own picker.
               showGroupPicker={localMode}
+              renderSourcePlaylists={(query) => playlistSource ? (
+                <PlaylistsPanel
+                  key={`${playlistSource.source.id}:${playlistSource.folderId}`}
+                  entry={playlistSource}
+                  groupId={selectedGroup?.id}
+                  localMode={localMode}
+                  collapsed={playlistsCollapsed}
+                  onToggleCollapsed={togglePlaylistsCollapsed}
+                  onPlayed={onPlaylistPlayed}
+                  customIcons={customIcons}
+                  reloadKey={playlistsReload}
+                  filter={query}
+                />
+              ) : null}
             />
           </Suspense>
         </section>
@@ -1302,20 +1318,6 @@ export function App() {
         </section>
         )}
 
-        {playlistSource ? (
-          <PlaylistsPanel
-            key={`${playlistSource.source.id}:${playlistSource.folderId}`}
-            entry={playlistSource}
-            groupId={selectedGroup?.id}
-            localMode={localMode}
-            collapsed={playlistsCollapsed}
-            onToggleCollapsed={togglePlaylistsCollapsed}
-            onPlayed={onPlaylistPlayed}
-            customIcons={customIcons}
-            reloadKey={playlistsReload}
-          />
-        ) : null}
-
         <HistoryPanel
           groupId={selectedGroup?.id}
           localMode={localMode}
@@ -1483,6 +1485,28 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   // Session cache of browse results, keyed by source + container id; evicted per-key
   // by the refresh button so revisiting a level is instant.
   const browseCache = useRef<Map<string, Awaited<ReturnType<typeof bridgeApi.browseSource>>>>(new Map());
+  // The top-level folders (Playlists, Liked Songs…) open in place, like the cards on the
+  // other screens. Which ones are open is kept per source and login.
+  const [openFolders, setOpenFolders] = useState<Record<string, string[]>>(readOpenFolders);
+  const rootKey = browseKey(undefined);
+  const openHere = openFolders[rootKey] ?? [];
+  const toggleFolder = useCallback((id: string) => {
+    setOpenFolders((current) => {
+      const list = current[rootKey] ?? [];
+      const next = { ...current, [rootKey]: list.includes(id) ? list.filter((open) => open !== id) : [...list, id] };
+      saveOpenFolders(next);
+      return next;
+    });
+  }, [rootKey]);
+  const loadFolder = useCallback(async (id: string, fresh: boolean) => {
+    const key = browseKey(id);
+    const cached = browseCache.current.get(key);
+    if (cached && !fresh) return cached;
+    if (!sourceId) throw new Error("Pick a source first");
+    const next = await bridgeApi.browseSource(sourceId, id, browseProfile);
+    browseCache.current.set(key, next);
+    return next;
+  }, [sourceId, browseProfile, browseKey]);
 
   // Keep the current location (rightmost crumb) in view as the trail grows.
   useEffect(() => {
@@ -1732,9 +1756,14 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
     return () => { cancelled = true; };
   }, [sourceId, stack, searchActive, refreshNonce, browseReady, browseKey, browseProfile]);
 
-  const drill = useCallback((item: { id: string; title: string }) => {
+  // From inside an open top-level folder, the path starts at that folder.
+  const drill = useCallback((item: { id: string; title: string }, folder?: { id: string; title: string }) => {
     setSearchActive(false);
-    setStack((current) => [...current, { id: item.id, title: item.title }]);
+    setStack((current) => [
+      ...current,
+      ...(folder ? [{ id: folder.id, title: folder.title }] : []),
+      { id: item.id, title: item.title }
+    ]);
   }, []);
 
   const pop = useCallback((targetIndex: number) => {
@@ -1776,7 +1805,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
 
   const verbFor = (mode: "replace" | "next" | "end") => mode === "replace" ? "Playing" : mode === "next" ? "Queued next:" : "Queued at end:";
 
-  const enqueueAll = useCallback(async (mode: "replace" | "next" | "end") => {
+  const enqueueAll = useCallback(async (mode: "replace" | "next" | "end", items: SourceBrowseItem[]) => {
     if (!sourceId || !selectedGroupId) {
       setStatus({ ok: false, message: "Pick a target first." });
       return;
@@ -1789,7 +1818,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
         return;
       }
       if (selectedGroupId === LOCAL_DEVICE_ID) {
-        const tracks: LocalTrack[] = (data?.items ?? [])
+        const tracks: LocalTrack[] = items
           .filter((entry) => entry.kind === "playable").slice(0, 100)
           .map((entry) => ({ sourceId, trackId: entry.id, title: entry.title, artist: entry.artist, album: entry.album, albumArtUri: entry.albumArtUri }));
         if (tracks.length === 0) { setStatus({ ok: false, message: "No playable tracks in this view." }); return; }
@@ -1797,7 +1826,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
         setStatus({ ok: true, message: `${verbFor(mode)} ${tracks.length} tracks on this device.` });
         return;
       }
-      const allTrackIds = (data?.items ?? []).filter((entry) => entry.kind === "playable").map((entry) => entry.id).slice(0, 100);
+      const allTrackIds = items.filter((entry) => entry.kind === "playable").map((entry) => entry.id).slice(0, 100);
       if (allTrackIds.length === 0) { setStatus({ ok: false, message: "No playable tracks in this view." }); return; }
       await bridgeApi.playSourceItems(sourceId, { trackIds: allTrackIds, groupId: selectedGroupId, mode });
       setStatus({ ok: true, message: `${verbFor(mode)} ${allTrackIds.length} tracks.` });
@@ -1806,7 +1835,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
     } finally {
       setPlaying(null);
     }
-  }, [sourceId, selectedGroupId, data, localPlayer, sonosOnly, activeSource?.name]);
+  }, [sourceId, selectedGroupId, localPlayer, sonosOnly, activeSource?.name]);
 
   const enqueueItem = useCallback(async (item: SourceBrowseItem, mode: "replace" | "next" | "end") => {
     if (!sourceId || !selectedGroupId) {
@@ -1851,6 +1880,143 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
       setPlaying(null);
     }
   }, [sourceId, selectedGroupId, buildLocalTracks, localPlayer, sonosOnly, activeSource?.name, browseProfile]);
+
+  // At the top of a source, its plain folders open in place (BrowseFolder); deeper down,
+  // and in search results, a folder opens as its own list with a path back.
+  const atRoot = stack.length === 0 && !searchActive;
+  const isFolder = (item: SourceBrowseItem) => item.kind === "container" && !item.albumArtUri && !(supportsPin && item.id.startsWith("show:"));
+
+  // "Play all" for a list of two or more songs.
+  const renderBulk = (items: SourceBrowseItem[]) => {
+    const playableCount = items.filter((entry) => entry.kind === "playable").length;
+    if (playableCount < 2) return null;
+    const enqueueLimit = Math.min(playableCount, 100);
+    return (
+      <div className="browse-bulk">
+        <span>{playableCount > 100 ? `Bulk actions act on first 100 of ${playableCount}` : `${playableCount} tracks`}</span>
+        <div className="browse-bulk-actions">
+          <button type="button" disabled={playing !== null || !selectedGroupId} onClick={() => void enqueueAll("replace", items)}>
+            <Play size={14} /> Play all ({enqueueLimit})
+          </button>
+          <button type="button" disabled={playing !== null || !selectedGroupId} onClick={() => void enqueueAll("next", items)}>
+            <ListPlus size={14} /> Play next
+          </button>
+          <button type="button" disabled={playing !== null || !selectedGroupId} onClick={() => void enqueueAll("end", items)}>
+            <ListEnd size={14} /> Add to end
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // One row of a list; folder is the open top-level folder it sits in, if any.
+  const renderItem = (item: SourceBrowseItem, index: number, folder?: SourceBrowseItem): ReactNode => {
+    // Sources (notably YouTube Music) can repeat an id across shelves, so the
+    // list index is part of the key — duplicate keys make React keep stale rows.
+    const itemKey = `${item.id}-${index}`;
+    if (item.kind === "section") {
+      return (
+        <li key={itemKey} className="browse-section">
+          {item.title}
+        </li>
+      );
+    }
+    if (item.kind === "container") {
+      // A followable podcast show (id "show:…") always shows a thumb row with a
+      // follow toggle — even without art — so it can be (un)followed from any
+      // list. Other art-bearing containers (albums/artists/playlists) get a
+      // thumb row too; purely navigational folders (Home, New Episodes) stay a
+      // plain button.
+      const isFollowable = supportsPin && item.id.startsWith("show:");
+      // Album containers (e.g. YouTube Music `album:…`) can be favorited.
+      const isAlbumContainer = item.id.startsWith("album:");
+      return (
+        <li key={itemKey}>
+          {item.albumArtUri || isFollowable ? (
+            <div className="browse-track">
+              <BrowseThumb src={item.albumArtUri} />
+              <button type="button" className="browse-drill-inline" onClick={() => drill(item, folder)}>
+                <span>{item.title}</span>
+                {item.subtitle ? <small>{item.subtitle}</small> : null}
+              </button>
+              {isFollowable ? (
+                <button
+                  type="button"
+                  className={`browse-action${pinnedIds.has(item.id) ? " pinned" : ""}`}
+                  title={pinnedIds.has(item.id) ? "Unfollow" : "Follow"}
+                  aria-label={pinnedIds.has(item.id) ? `Unfollow ${item.title}` : `Follow ${item.title}`}
+                  aria-pressed={pinnedIds.has(item.id)}
+                  onClick={() => void togglePin(item)}
+                >
+                  <Pin size={16} fill={pinnedIds.has(item.id) ? "currentColor" : "none"} />
+                </button>
+              ) : null}
+              {isAlbumContainer ? (
+                <button
+                  type="button"
+                  className={`browse-action${isFavorited(item) ? " pinned" : ""}`}
+                  title={isFavorited(item) ? "Unfavorite album" : "Favorite album"}
+                  aria-label={isFavorited(item) ? `Unfavorite ${item.title}` : `Favorite ${item.title}`}
+                  aria-pressed={isFavorited(item)}
+                  onClick={() => void toggleFavorite(item)}
+                >
+                  <Heart size={16} fill={isFavorited(item) ? "currentColor" : "none"} />
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <button type="button" className="browse-drill" onClick={() => drill(item, folder)}>
+              <span>{item.title}</span>
+              {item.subtitle ? <small>{item.subtitle}</small> : null}
+            </button>
+          )}
+        </li>
+      );
+    }
+    const subtitle = item.kind === "album"
+      ? item.subtitle
+      : [item.artist, item.album].filter(Boolean).join(" · ") + (item.durationSeconds ? ` · ${formatDuration(item.durationSeconds)}` : "");
+    const isAlbum = item.kind === "album";
+    return (
+      <li key={itemKey}>
+        <div className="browse-track">
+          <BrowseThumb src={item.albumArtUri} />
+          {isAlbum ? (
+            <button type="button" className="browse-drill-inline" onClick={() => drill(item, folder)}>
+              <span>{item.title}</span>
+              {subtitle ? <small>{subtitle}</small> : null}
+            </button>
+          ) : (
+            <div className="browse-track-meta">
+              <span>{item.title}</span>
+              {subtitle ? <small>{subtitle}</small> : null}
+            </div>
+          )}
+          <div className="browse-actions">
+            <button
+              type="button"
+              className="browse-action"
+              title={isAlbum ? "Play this concert (replace queue)" : "Play now (replace queue)"}
+              aria-label="Play now"
+              disabled={playing !== null || !selectedGroupId}
+              onClick={() => void enqueueItem(item, "replace")}
+            >
+              {playing === `${item.id}:replace` ? "…" : <Play size={14} />}
+            </button>
+            <button
+              type="button"
+              className="browse-action"
+              title="More actions"
+              aria-label="More actions"
+              onClick={(event) => setMenu({ item, x: event.clientX, y: event.clientY })}
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </div>
+        </div>
+      </li>
+    );
+  };
 
   if (sources && sources.length === 0) {
     return (
@@ -1978,27 +2144,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
         </div>
       ) : null}
 
-      {(() => {
-        const playableCount = (data?.items ?? []).filter((entry) => entry.kind === "playable").length;
-        if (playableCount < 2) return null;
-        const enqueueLimit = Math.min(playableCount, 100);
-        return (
-          <div className="browse-bulk">
-            <span>{playableCount > 100 ? `Bulk actions act on first 100 of ${playableCount}` : `${playableCount} tracks`}</span>
-            <div className="browse-bulk-actions">
-              <button type="button" disabled={playing !== null || !selectedGroupId} onClick={() => void enqueueAll("replace")}>
-                <Play size={14} /> Play all ({enqueueLimit})
-              </button>
-              <button type="button" disabled={playing !== null || !selectedGroupId} onClick={() => void enqueueAll("next")}>
-                <ListPlus size={14} /> Play next
-              </button>
-              <button type="button" disabled={playing !== null || !selectedGroupId} onClick={() => void enqueueAll("end")}>
-                <ListEnd size={14} /> Add to end
-              </button>
-            </div>
-          </div>
-        );
-      })()}
+      {renderBulk(data?.items ?? [])}
 
       <nav className="browse-crumbs" aria-label="Path" ref={crumbsRef}>
         {stack.length === 0 ? (
@@ -2042,111 +2188,25 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
         ) : (
           <ol className="browse-list">
             {data.items.map((item, index) => {
-              // Sources (notably YouTube Music) can repeat an id across shelves, so the
-              // list index is part of the key — duplicate keys make React keep stale rows.
-              const itemKey = `${item.id}-${index}`;
-              if (item.kind === "section") {
+              if (atRoot && isFolder(item)) {
                 return (
-                  <li key={itemKey} className="browse-section">
-                    {item.title}
-                  </li>
+                  <BrowseFolder
+                    key={`${rootKey}|${item.id}-${index}`}
+                    folder={item}
+                    open={openHere.includes(item.id)}
+                    onToggle={() => toggleFolder(item.id)}
+                    cached={browseCache.current.get(browseKey(item.id))}
+                    load={loadFolder}
+                    renderItems={(items) => (
+                      <>
+                        {renderBulk(items)}
+                        <ol className="browse-list nested">{items.map((child, childIndex) => renderItem(child, childIndex, item))}</ol>
+                      </>
+                    )}
+                  />
                 );
               }
-              if (item.kind === "container") {
-                // A followable podcast show (id "show:…") always shows a thumb row with a
-                // follow toggle — even without art — so it can be (un)followed from any
-                // list. Other art-bearing containers (albums/artists/playlists) get a
-                // thumb row too; purely navigational folders (Home, New Episodes) stay a
-                // plain button.
-                const isFollowable = supportsPin && item.id.startsWith("show:");
-                // Album containers (e.g. YouTube Music `album:…`) can be favorited.
-                const isAlbumContainer = item.id.startsWith("album:");
-                return (
-                  <li key={itemKey}>
-                    {item.albumArtUri || isFollowable ? (
-                      <div className="browse-track">
-                        <BrowseThumb src={item.albumArtUri} />
-                        <button type="button" className="browse-drill-inline" onClick={() => drill(item)}>
-                          <span>{item.title}</span>
-                          {item.subtitle ? <small>{item.subtitle}</small> : null}
-                        </button>
-                        {isFollowable ? (
-                          <button
-                            type="button"
-                            className={`browse-action${pinnedIds.has(item.id) ? " pinned" : ""}`}
-                            title={pinnedIds.has(item.id) ? "Unfollow" : "Follow"}
-                            aria-label={pinnedIds.has(item.id) ? `Unfollow ${item.title}` : `Follow ${item.title}`}
-                            aria-pressed={pinnedIds.has(item.id)}
-                            onClick={() => void togglePin(item)}
-                          >
-                            <Pin size={16} fill={pinnedIds.has(item.id) ? "currentColor" : "none"} />
-                          </button>
-                        ) : null}
-                        {isAlbumContainer ? (
-                          <button
-                            type="button"
-                            className={`browse-action${isFavorited(item) ? " pinned" : ""}`}
-                            title={isFavorited(item) ? "Unfavorite album" : "Favorite album"}
-                            aria-label={isFavorited(item) ? `Unfavorite ${item.title}` : `Favorite ${item.title}`}
-                            aria-pressed={isFavorited(item)}
-                            onClick={() => void toggleFavorite(item)}
-                          >
-                            <Heart size={16} fill={isFavorited(item) ? "currentColor" : "none"} />
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <button type="button" className="browse-drill" onClick={() => drill(item)}>
-                        <span>{item.title}</span>
-                        {item.subtitle ? <small>{item.subtitle}</small> : null}
-                      </button>
-                    )}
-                  </li>
-                );
-              }
-              const subtitle = item.kind === "album"
-                ? item.subtitle
-                : [item.artist, item.album].filter(Boolean).join(" · ") + (item.durationSeconds ? ` · ${formatDuration(item.durationSeconds)}` : "");
-              const isAlbum = item.kind === "album";
-              return (
-                <li key={itemKey}>
-                  <div className="browse-track">
-                    <BrowseThumb src={item.albumArtUri} />
-                    {isAlbum ? (
-                      <button type="button" className="browse-drill-inline" onClick={() => drill(item)}>
-                        <span>{item.title}</span>
-                        {subtitle ? <small>{subtitle}</small> : null}
-                      </button>
-                    ) : (
-                      <div className="browse-track-meta">
-                        <span>{item.title}</span>
-                        {subtitle ? <small>{subtitle}</small> : null}
-                      </div>
-                    )}
-                    <div className="browse-actions">
-                      <button
-                        type="button"
-                        className="browse-action"
-                        title={isAlbum ? "Play this concert (replace queue)" : "Play now (replace queue)"}
-                        aria-label="Play now"
-                        disabled={playing !== null || !selectedGroupId}
-                        onClick={() => void enqueueItem(item, "replace")}
-                      >
-                        {playing === `${item.id}:replace` ? "…" : <Play size={14} />}
-                      </button>
-                      <button
-                        type="button"
-                        className="browse-action"
-                        title="More actions"
-                        aria-label="More actions"
-                        onClick={(event) => setMenu({ item, x: event.clientX, y: event.clientY })}
-                      >
-                        <MoreHorizontal size={14} />
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              );
+              return renderItem(item, index);
             })}
           </ol>
         )
@@ -2901,8 +2961,8 @@ function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChrom
       </label>
       <label className="pref-row">
         <span className="pref-label">
-          <strong>Playlists on the main screen</strong>
-          <small>Shows this source&rsquo;s playlists as a grid under the queue. Tap one to play it.</small>
+          <strong>Playlists in Library</strong>
+          <small>Shows this source&rsquo;s playlists as a grid in Library, after the MiSonos playlists. Tap one to play it.</small>
         </span>
         <select
           className="pref-select"
