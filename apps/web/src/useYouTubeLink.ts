@@ -123,7 +123,7 @@ export function useYouTubeLink({ url, status, groupId, groupName, onJob, onStart
     if (!videoId) blocked = "Play takes a single video. Download gets the whole playlist.";
     else if (!groupId) blocked = "Pick a Sonos room to play it on: this device can't play YouTube links.";
   } else if (!status?.paired) {
-    blocked = "Pair MiSonos with Downtify in Settings → YouTube links to download.";
+    blocked = "Pair MiSonos with Downtify in Settings → YouTube to download.";
   }
 
   let hint = "";

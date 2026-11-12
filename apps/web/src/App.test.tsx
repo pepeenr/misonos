@@ -169,6 +169,33 @@ describe("App", () => {
     expect(searches[1]).toContain("q=wharf%20rat");
   });
 
+  it("searches for a pasted YouTube link like anything else while YouTube Music is off", async () => {
+    const searches: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
+      if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
+      // YouTube Music is switched off, so it isn't listed; Downtify is still paired.
+      if (url.endsWith("/api/sources")) return json([{ id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] }]);
+      if (url.endsWith("/api/sources/navidrome/browse")) return json({ id: "root", total: 0, items: [] });
+      if (url.includes("/search?")) {
+        searches.push(url);
+        return json({ id: "search", total: 0, items: [] });
+      }
+      if (url.endsWith("/api/youtube/status")) return json({ available: true, paired: true, username: "pepe", playlist: "YouTube", mixSongs: 10 });
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    const box = await screen.findByRole("searchbox", { name: "Search Navidrome" });
+    await waitFor(() => expect(box).toHaveAttribute("placeholder", "Search Navidrome"));
+    fireEvent.change(box, { target: { value: "https://youtu.be/aaaaaaaaaaa" } });
+    fireEvent.submit(box.closest("form")!);
+    await waitFor(() => expect(searches).toHaveLength(1));
+    expect(searches[0]).toContain(encodeURIComponent("https://youtu.be/aaaaaaaaaaa"));
+  });
+
   it("gets a pasted YouTube link instead of searching for it, and shows how it's going", async () => {
     window.localStorage.clear();
     FakeEventSource.instances = [];
@@ -178,8 +205,14 @@ describe("App", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
       if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
-      if (url.endsWith("/api/sources")) return json([{ id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] }]);
+      if (url.endsWith("/api/sources")) {
+        return json([
+          { id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] },
+          { id: "youtube-music", name: "YouTube Music", rootId: "home", capabilities: ["search"] }
+        ]);
+      }
       if (url.endsWith("/api/sources/navidrome/browse")) return json({ id: "root", total: 2, items: [{ id: "artists", title: "Artists", kind: "container" }, { id: "playlists", title: "Playlists", kind: "container" }] });
+      if (url.endsWith("/api/sources/youtube-music/browse")) return json({ id: "home", total: 0, items: [] });
       if (url.endsWith("/browse?id=playlists")) {
         playlistLoads += 1;
         return json({ id: "playlists", total: 1, items: [{ id: "pl:1", title: "Road Trip", kind: "album" }] });

@@ -292,7 +292,9 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
               </p>
               {accounts.accounts.length > 1 ? (
                 <p className="settings-card-help">
-                  Connect each login's own Spotify account to see its playlists and library in Music. Spotify only lets
+                  Connect each login's own Spotify account to see its playlists and library in Music. Spotify signs in
+                  with the account this browser already uses on spotify.com, so for someone else's: connect it on their
+                  phone, or press <strong>Not you?</strong> on Spotify's page and sign in as them. Spotify only lets
                   accounts sign in that are listed under User Management on your Spotify app (up to five).
                 </p>
               ) : null}
@@ -328,6 +330,13 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
                       />
                       <LoginLibrary
                         own={status.profiles?.[accountKey(account)]}
+                        sameAs={accounts.accounts
+                          .filter((other) => accountKey(other) !== accountKey(account))
+                          .filter((other) => {
+                            const ownId = status.profiles?.[accountKey(account)]?.id;
+                            return ownId !== undefined && status.profiles?.[accountKey(other)]?.id === ownId;
+                          })
+                          .map((other) => (other.name ? `${other.name} (login #${other.sn})` : `login #${other.sn}`))}
                         fallback={mainAccountName}
                         busy={busy}
                         onConnect={() => window.location.assign(connectUrl(accountKey(account)))}
@@ -346,8 +355,10 @@ export function SpotifySettings({ onSourcesChanged }: { onSourcesChanged?: () =>
 }
 
 /** Whose library Music shows for a Sonos login, and a way to give the login its own account. */
-function LoginLibrary({ own, fallback, busy, onConnect, onDisconnect }: {
+function LoginLibrary({ own, sameAs, fallback, busy, onConnect, onDisconnect }: {
   own?: { id: string; displayName?: string };
+  /** Other logins connected to this same Spotify account: one of them is likely wrong. */
+  sameAs: string[];
   fallback?: string;
   busy: boolean;
   onConnect: () => void;
@@ -357,7 +368,12 @@ function LoginLibrary({ own, fallback, busy, onConnect, onDisconnect }: {
     <div className="spotify-login-library">
       {own ? (
         <>
-          <span>Music shows {own.displayName || own.id}&rsquo;s library.</span>
+          <span>
+            Music shows {own.displayName || own.id}&rsquo;s library
+            {sameAs.length > 0
+              ? `, the same account as ${sameAs.join(" and ")}. If this login is someone else's, disconnect it and connect again as them.`
+              : "."}
+          </span>
           <button type="button" className="secondary" disabled={busy} onClick={onDisconnect}>Disconnect</button>
         </>
       ) : (

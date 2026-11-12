@@ -26,7 +26,7 @@ import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
 import { forgetPlaylists, pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
-import { SettingsCard, SettingsSection } from "./SettingsSection.js";
+import { SettingsSection } from "./SettingsSection.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { SpotifyNowPlaying } from "./SpotifyNowPlaying.js";
@@ -967,9 +967,8 @@ export function App() {
           <Equalizer zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <Alarms zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <AboutSystem />
-          <YouTubeMusicAuth />
           <SpotifySettings onSourcesChanged={() => setSourcesVersion((version) => version + 1)} />
-          <YouTubeSettings onChanged={() => setSourcesVersion((version) => version + 1)} />
+          <YouTubeSettings sourcesVersion={sourcesVersion} onChanged={() => setSourcesVersion((version) => version + 1)} />
           <CustomMusicServices
             zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)}
             customIcons={customIcons}
@@ -1555,7 +1554,10 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   useEffect(() => {
     void bridgeApi.youtubeStatus().then(setYoutube).catch(() => setYoutube(null));
   }, [sourcesVersion]);
-  const queryIsYouTube = Boolean(youtube?.available) && isYouTubeLink(searchQuery);
+  // Only while YouTube Music is on as a source (Settings → Custom Music Services): with it
+  // off, a pasted link is just searched for like anything else.
+  const youtubeLinks = Boolean(youtube?.available) && !!sources?.some((entry) => entry.id === "youtube-music");
+  const queryIsYouTube = youtubeLinks && isYouTubeLink(searchQuery);
   // "This device" isn't a Sonos room: the songs are then only saved to the playlist.
   const youtubeGroupId = selectedGroupId && selectedGroupId !== LOCAL_DEVICE_ID ? selectedGroupId : undefined;
   const changeQuery = (value: string) => setSearchQuery(value);
@@ -1889,12 +1891,12 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
               value={searchQuery}
               onChange={(event) => changeQuery(event.target.value)}
               placeholder={supportsSearch
-                ? `Search ${activeSource?.name ?? "music"}${youtube?.available ? " or paste a YouTube link" : ""}`
-                : youtube?.available ? "Paste a YouTube link" : `${activeSource?.name ?? "This source"} has no search`}
+                ? `Search ${activeSource?.name ?? "music"}${youtubeLinks ? " or paste a YouTube link" : ""}`
+                : youtubeLinks ? "Paste a YouTube link" : `${activeSource?.name ?? "This source"} has no search`}
               aria-label={`Search ${activeSource?.name ?? "music"}`}
               aria-keyshortcuts="/"
               enterKeyHint="search"
-              disabled={!supportsSearch && !youtube?.available}
+              disabled={!supportsSearch && !youtubeLinks}
             />
           </span>
           {searchActive ? (
@@ -1923,7 +1925,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
               type="search"
               value={searchQuery}
               onChange={(event) => changeQuery(event.target.value)}
-              placeholder={`Search ${activeSource?.name ?? ""}${youtube?.available ? " or paste a YouTube link" : ""}`}
+              placeholder={`Search ${activeSource?.name ?? ""}${youtubeLinks ? " or paste a YouTube link" : ""}`}
               aria-label={`Search ${activeSource?.name ?? "music"}`}
               aria-keyshortcuts="/"
               enterKeyHint="search"
@@ -3026,108 +3028,6 @@ function swGenLabel(value: string | undefined): string | undefined {
   if (value === "1") return "S1";
   if (value === "2") return "S2";
   return value;
-}
-
-function YouTubeMusicAuth() {
-  type Status = { cookieAuth?: "signed-in" | "signed-out" };
-  const [status, setStatus] = useState<Status | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [paste, setPaste] = useState("");
-  const [showPaste, setShowPaste] = useState(false);
-
-  const cookieSignedIn = status?.cookieAuth === "signed-in";
-
-  const saveCookies = useCallback(async () => {
-    setBusy(true);
-    setError("");
-    try {
-      setStatus(await bridgeApi.sourceAuthSetCookies("youtube-music", paste));
-      setPaste("");
-      setShowPaste(false);
-      window.dispatchEvent(new CustomEvent("misonos:source-auth-changed", { detail: { sourceId: "youtube-music" } }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save cookies");
-    } finally {
-      setBusy(false);
-    }
-  }, [paste]);
-
-  const clearCookies = useCallback(async () => {
-    setBusy(true);
-    setError("");
-    try {
-      setStatus(await bridgeApi.sourceAuthClearCookies("youtube-music"));
-      window.dispatchEvent(new CustomEvent("misonos:source-auth-changed", { detail: { sourceId: "youtube-music" } }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't clear cookies");
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  const refresh = useCallback(async () => {
-    try {
-      setStatus(await bridgeApi.sourceAuthStatus("youtube-music"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to read auth status");
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  // Re-read status when auth changes elsewhere (e.g. the browser detected the
-  // backend dropping expired cookies), so this card's label stays accurate.
-  useEffect(() => {
-    const onAuthChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ sourceId?: string }>).detail;
-      if (!detail?.sourceId || detail.sourceId === "youtube-music") void refresh();
-    };
-    window.addEventListener("misonos:source-auth-changed", onAuthChanged);
-    return () => window.removeEventListener("misonos:source-auth-changed", onAuthChanged);
-  }, [refresh]);
-
-  return (
-    <SettingsCard id="youtube-music" title="YouTube Music">
-      <p className="settings-card-help">Anonymous search and browse work out of the box. Connect your Library &amp; My Supermix by pasting your YouTube&nbsp;Music cookies below.</p>
-      {error ? <p className="settings-card-error">{error}</p> : null}
-      <h4 className="settings-card-subhead">Library &amp; Supermix (cookies)</h4>
-      <p className="settings-card-help">
-        Your Library and My Supermix need your YouTube&nbsp;Music cookies. On a computer, open{" "}
-        <a href="https://music.youtube.com" target="_blank" rel="noreferrer">music.youtube.com</a> (signed in) →
-        DevTools → <strong>Network</strong> → click any <code>/browse</code> request → right-click →
-        <strong> Copy → Copy as cURL</strong>, then paste it below.
-      </p>
-      {cookieSignedIn ? (
-        <div className="settings-card-row">
-          <span>Library connected.</span>
-          <button type="button" disabled={busy} onClick={() => void clearCookies()}>Disconnect</button>
-        </div>
-      ) : showPaste ? (
-        <div className="settings-card-row settings-card-column">
-          <textarea
-            className="settings-card-textarea"
-            value={paste}
-            disabled={busy}
-            placeholder="Paste the full 'Copy as cURL' here…"
-            onChange={(event) => setPaste(event.target.value)}
-            rows={4}
-          />
-          <div className="settings-card-row">
-            <button type="button" disabled={busy || !paste.trim()} onClick={() => void saveCookies()}>Save cookies</button>
-            <button type="button" className="secondary" disabled={busy} onClick={() => { setShowPaste(false); setPaste(""); }}>Cancel</button>
-          </div>
-        </div>
-      ) : (
-        <div className="settings-card-row">
-          <span>Library not connected.</span>
-          <button type="button" disabled={busy} onClick={() => setShowPaste(true)}>Paste cookies</button>
-        </div>
-      )}
-    </SettingsCard>
-  );
 }
 
 function MusicServicesDebug() {
