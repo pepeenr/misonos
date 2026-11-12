@@ -150,6 +150,6 @@ describe("the YouTube link panel", () => {
   it("asks to pair with Downtify before downloading", () => {
     render(<Harness status={{ ...STATUS, paired: false }} />);
     paste(VIDEO);
-    expect(screen.getByRole("status")).toHaveTextContent("Pair MiSonos with Downtify in Settings → YouTube links to download.");
+    expect(screen.getByRole("status")).toHaveTextContent("Pair MiSonos with Downtify in Settings → YouTube to download.");
   });
 });
