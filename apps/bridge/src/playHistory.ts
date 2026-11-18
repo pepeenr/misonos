@@ -85,7 +85,8 @@ export class PlayHistoryRecorder {
       previous.readAt = readAt;
       return;
     }
-    const ref = this.options.refOf(nowPlaying.uri);
+    // Spotify Connect names the song only in its metadata (songUri).
+    const ref = this.options.refOf(nowPlaying.uri) ?? this.options.refOf(nowPlaying.songUri);
     const entry = await this.options.add({
       playedAt: new Date(now).toISOString(),
       groupId,

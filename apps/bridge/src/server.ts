@@ -66,7 +66,7 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
   const recordPlayed = async (groupId: string, nowPlaying: NowPlaying): Promise<void> => {
     try {
       if (nowPlaying.state !== "PLAYING") return;
-      const ref = service.refFromQueueUri(nowPlaying.uri);
+      const ref = service.refFromNowPlaying(nowPlaying);
       if (!ref || !nowPlaying.title) return;
       const key = `${ref.sourceId}\n${ref.trackId}`;
       if (lastPlayedRef.get(groupId) === key) return;
