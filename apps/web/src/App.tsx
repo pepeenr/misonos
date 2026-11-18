@@ -21,6 +21,7 @@ import { YouTubeSettings } from "./YouTubeSettings.js";
 import { describeImport, isYouTubeLink } from "./youtube.js";
 import { useYouTubeLink } from "./useYouTubeLink.js";
 import { useAppUpdate } from "./appUpdate.js";
+import { AppVersion } from "./AppVersion.js";
 import { YouTubeLinkPanel } from "./YouTubeLinkPanel.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
@@ -998,6 +999,7 @@ export function App() {
               <BrowseDebug />
             </>
           ) : null}
+          <AppVersion />
         </section>
       ) : view === "editor" ? (
         <section className="editor-page" aria-label="Group editor">
