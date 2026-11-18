@@ -1,10 +1,40 @@
+import { execSync } from "node:child_process";
 import react from "@vitejs/plugin-react";
+import type { Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vitest/config";
 
+// Which build this is (src/buildInfo.ts). The Docker build has no .git, so the commit
+// comes from Coolify's SOURCE_COMMIT when it passes one, else from git when there is one.
+function gitCommit(): string | undefined {
+  const fromCoolify = process.env.SOURCE_COMMIT?.trim();
+  if (fromCoolify && fromCoolify !== "HEAD") return fromCoolify.slice(0, 7);
+  try {
+    return execSync("git rev-parse --short=7 HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+const build = { time: new Date().toISOString(), commit: gitCommit() };
+
+// Also written to /build.json, so an open app can see whether the server has a newer build.
+function buildJson(): Plugin {
+  return {
+    name: "misonos-build-json",
+    apply: "build",
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "build.json", source: JSON.stringify(build) });
+    }
+  };
+}
+
 export default defineConfig({
+  define: {
+    __MISONOS_BUILD__: JSON.stringify(build)
+  },
   plugins: [
     react(),
+    buildJson(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["favicon.png", "apple-touch-icon.png"],
