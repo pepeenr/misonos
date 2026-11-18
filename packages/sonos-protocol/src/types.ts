@@ -105,6 +105,9 @@ export interface NowPlaying {
   position?: string;
   playlistPosition?: number;
   uri?: string;
+  // The song's own URI from its metadata, when the transport's `uri` isn't it: Spotify
+  // Connect plays a session (x-sonos-vli:…,spotify:…) and names the song only here.
+  songUri?: string;
   repeat?: RepeatMode;
   shuffle?: boolean;
   crossfade?: boolean;

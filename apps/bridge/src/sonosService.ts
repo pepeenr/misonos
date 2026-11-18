@@ -283,6 +283,7 @@ export class SonosService {
         position: position.RelTime,
         playlistPosition: numericPosition(position.Track),
         uri: position.TrackURI,
+        songUri: item?.uri && item.uri !== position.TrackURI ? item.uri : undefined,
         repeat,
         shuffle,
         crossfade: crossfade.CrossfadeMode === "1",
@@ -1224,6 +1225,11 @@ export class SonosService {
   /** Public wrapper for callers (e.g. resume capture) that need the source ref of a now-playing URI. */
   refFromQueueUri(uri: string | undefined): { sourceId: string; trackId: string } | undefined {
     return this.queueUriToRef(uri);
+  }
+
+  /** The source track a room is playing, also when only its metadata names it (Spotify Connect). */
+  refFromNowPlaying(nowPlaying: Pick<NowPlaying, "uri" | "songUri">): { sourceId: string; trackId: string } | undefined {
+    return this.queueUriToRef(nowPlaying.uri) ?? this.queueUriToRef(nowPlaying.songUri);
   }
 
   /**

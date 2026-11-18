@@ -103,6 +103,14 @@ describe("the play history", () => {
     expect(rows[0]).toMatchObject({ isLive: true, sourceId: null, trackId: null });
   });
 
+  it("finds a Spotify Connect song's source track in its metadata, not the session URI", async () => {
+    const connect = (title: string) => playing("g1", title, { uri: "x-sonos-vli:RINCON_1:2,spotify:3fea3eb7", songUri: `navidrome/${title}` });
+    await at(0, connect("One"));
+    await at(3, connect("Two"));
+    expect(rows.map((row) => [row.title, row.trackId])).toEqual([["Two", "Two"], ["One", "One"]]);
+    expect(rows[0]).toMatchObject({ sourceId: "navidrome", isLive: false });
+  });
+
   it("leaves out stops, the TV, line-in, untitled streams and the speaker's placeholders", async () => {
     await at(0, { ...playing("g1", "One"), state: "STOPPED" });
     await at(1, playing("g1", "TV", { uri: "x-sonos-htastream:RINCON_1:spdif" }));

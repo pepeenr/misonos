@@ -97,11 +97,11 @@ export function spotifyQueueItem(track: SourceTrackInfo, account: Pick<SonosSpot
 }
 
 // The Spotify track URI behind a queue/now-playing URI, whoever queued it (MiSonos,
-// the Sonos app, a favorite).
+// the Sonos app, a favorite). Spotify Connect's song metadata leaves the colons unencoded.
 export function spotifyTrackFromSonosUri(uri: string | undefined): string | undefined {
-  const match = uri?.match(/^x-sonos-spotify:(spotify%3atrack%3a[A-Za-z0-9]+)\?/i);
+  const match = uri?.match(/^x-sonos-spotify:spotify(?::|%3a)track(?::|%3a)([A-Za-z0-9]+)(?:\?|$)/i);
   if (!match) return undefined;
-  return decodeURIComponent(match[1]);
+  return `spotify:track:${match[1]}`;
 }
 
 // --- Switching a Spotify login, and Spotify radio ------------------------------------

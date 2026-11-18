@@ -105,4 +105,11 @@ describe("Spotify URIs", () => {
     expect(spotifyTrackFromSonosUri("x-sonos-spotify:spotify%3atrack%3a15ErUnXk?sid=9&flags=8224&sn=3")).toBe("spotify:track:15ErUnXk");
     expect(spotifyTrackFromSonosUri("x-sonos-http:abc.mp4?sid=240&sn=0")).toBeUndefined();
   });
+
+  it("reads Spotify Connect's song URI, whose colons aren't encoded", () => {
+    expect(spotifyTrackFromSonosUri("x-sonos-spotify:spotify:track:0h6ioq1Pr3ztuzuovJivAp?sid=9&flags=0&sn=7")).toBe("spotify:track:0h6ioq1Pr3ztuzuovJivAp");
+    expect(spotifyTrackFromSonosUri("x-sonos-spotify:spotify:track:0h6ioq1Pr3ztuzuovJivAp")).toBe("spotify:track:0h6ioq1Pr3ztuzuovJivAp");
+    expect(spotifyTrackFromSonosUri("x-sonos-vli:RINCON_347E5CF374D801400:2,spotify:3fea3eb74aa5eeaf6dc72ea8f3b5aa09")).toBeUndefined();
+    expect(spotifyTrackFromSonosUri("x-sonos-spotify:spotify:album:0h6ioq1Pr3ztuzuovJivAp?sid=9")).toBeUndefined();
+  });
 });
