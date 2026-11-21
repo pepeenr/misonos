@@ -733,7 +733,7 @@ h2 {
   justify-content: center;
   width: 44px;
   height: 44px;
-  border-radius: 9999px;
+  border-radius: 8px;
   border: 1px solid rgba(242, 240, 232, 0.2);
   background: rgba(0, 0, 0, 0.35);
   color: #f2f0e8;
@@ -789,7 +789,7 @@ h2 {
   align-items: center;
   gap: 6px;
   padding: 7px 12px;
-  border-radius: 9999px;
+  border-radius: 8px;
   border: 1px solid rgba(242, 240, 232, 0.2);
   background: rgba(0, 0, 0, 0.3);
   color: #d7d2c4;
@@ -813,7 +813,7 @@ h2 {
 
 .vu-start {
   padding: 12px 26px;
-  border-radius: 9999px;
+  border-radius: 8px;
   border: 1px solid rgba(145, 211, 196, 0.5);
   background: rgba(145, 211, 196, 0.14);
   color: #d7f2ea;
@@ -1255,7 +1255,7 @@ h2 {
 .browse-search-types button {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(242, 240, 232, 0.18);
-  border-radius: 999px;
+  border-radius: 8px;
   color: #f2f0e8;
   padding: 5px 14px;
   font-size: 0.82rem;
@@ -1596,7 +1596,7 @@ h2 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 9999px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(242, 240, 232, 0.18);
   color: #f2f0e8;
@@ -1797,14 +1797,14 @@ h2 {
   to { opacity: 0.45; }
 }
 
-/* Under the song while Spotify plays: the Spotify login it plays on, and artist radio. */
-.spotify-now-playing {
+/* Under the song: song radio, and while Spotify plays, the Spotify login it plays on and artist radio. */
+.now-playing-actions {
   display: grid;
   gap: 6px;
   margin: 2px 0 8px;
 }
 
-.spotify-now-playing-row {
+.now-playing-actions-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1821,7 +1821,7 @@ h2 {
 
 .spotify-login select {
   border: 1px solid rgba(29, 185, 84, 0.45);
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 4px 10px;
   color: #f2f0e8;
   background: rgba(29, 185, 84, 0.12);
@@ -1834,12 +1834,12 @@ h2 {
   cursor: progress;
 }
 
-.spotify-radio {
+.now-playing-radio {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   border: 1px solid rgba(242, 240, 232, 0.16);
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 4px 12px;
   color: #d7d2c4;
   background: rgba(255, 255, 255, 0.04);
@@ -1847,12 +1847,12 @@ h2 {
   cursor: pointer;
 }
 
-.spotify-radio:hover:not(:disabled) {
+.now-playing-radio:hover:not(:disabled) {
   border-color: rgba(145, 211, 196, 0.5);
   color: #91d3c4;
 }
 
-.spotify-radio:disabled {
+.now-playing-radio:disabled {
   opacity: 0.6;
   cursor: progress;
 }
@@ -1879,7 +1879,7 @@ h2 {
   font-family: inherit;
 }
 
-.spotify-now-playing-note {
+.now-playing-actions-note {
   font-size: 0.8rem;
   color: #8a8e88;
 }
@@ -1979,6 +1979,11 @@ h2 {
   flex: 0 0 86px;
 }
 
+/* Where the song radio button sits on rows that have none (a station). */
+.history-radio-spacer {
+  flex: 0 0 40px;
+}
+
 .history-item .browse-thumb-empty svg {
   width: 18px;
   height: 18px;
@@ -2005,6 +2010,7 @@ h2 {
   .history-when small { font-size: inherit; }
   .history-when small::before { content: "· "; }
   .history-action-spacer,
+  .history-radio-spacer,
   .history-item .queue-remove { display: none; }
 }
 
@@ -2556,7 +2562,7 @@ small {
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 9999px;
+  border-radius: 8px;
   border: 1px solid rgba(242, 240, 232, 0.25);
   background: rgba(12, 12, 10, 0.6);
   backdrop-filter: blur(4px);
@@ -3315,7 +3321,7 @@ small {
   align-items: center;
   gap: 4px;
   padding: 6px 12px;
-  border-radius: 999px;
+  border-radius: 8px;
   border: 1px solid rgba(145, 211, 196, 0.4);
   background: rgba(145, 211, 196, 0.1);
   color: #f2f0e8;

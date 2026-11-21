@@ -45,13 +45,15 @@ describe("the History card", () => {
     calls = [];
     const rows = [
       entry(2, "Radio song", new Date(Date.now() - 60_000), { rooms: "Office", artist: null, isLive: true }),
-      entry(1, "Ripple", new Date(Date.now() - 120_000), { sourceId: "navidrome", trackId: "t9", album: "American Beauty" })
+      entry(1, "Ripple", new Date(Date.now() - 120_000), { sourceId: "navidrome", trackId: "t9", album: "American Beauty" }),
+      entry(0, "Elsewhere", new Date(Date.now() - 180_000), { artist: "Spotify Connect Artist" })
     ];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, body: typeof init?.body === "string" ? init.body : undefined });
       const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url.includes("/api/history?")) return json(rows);
       if (url.endsWith("/api/sources/navidrome/play")) return json({ groupId: "g1", state: "PLAYING", title: "Ripple", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/song-radio")) return json({ seed: { title: "Elsewhere" }, songs: 24, from: ["spotify"], upNext: false, nowPlaying: { groupId: "g1", state: "PLAYING", title: "Elsewhere", updatedAt: "" } });
       if (url.includes("/api/history/")) return new Response(null, { status: 204 });
       return json({});
     }));
@@ -99,7 +101,7 @@ describe("the History card", () => {
     await screen.findByText("Sugar Magnolia");
     expect(screen.queryByText("Radio song")).toBeNull();
     const titles = screen.getAllByRole("listitem").map((item) => item.querySelector(".queue-meta > span")?.textContent);
-    expect(titles).toEqual(["Sugar Magnolia", "Ripple"]);
+    expect(titles).toEqual(["Sugar Magnolia", "Ripple", "Elsewhere"]);
   });
 
   it("removes a row from the history", async () => {
@@ -108,6 +110,20 @@ describe("the History card", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Remove Ripple from the history" })); });
     expect(screen.queryByText("Ripple")).toBeNull();
     expect(calls.some((call) => call.url.endsWith("/api/history/1/delete"))).toBe(true);
+  });
+
+  it("starts a song radio from any song, also one MiSonos can't play, but not from a station", async () => {
+    const { onPlayed } = renderPanel();
+    const card = await screen.findByRole("region", { name: "History" });
+    await within(card).findByText("Elsewhere");
+    expect(within(card).queryByRole("button", { name: "Start a radio from Radio song" })).toBeNull();
+    expect(within(card).getByRole("button", { name: "Start a radio from Ripple" })).toBeTruthy();
+
+    fireEvent.click(within(card).getByRole("button", { name: "Start a radio from Elsewhere" }));
+    expect(await within(card).findByText("Radio from “Elsewhere”: 24 songs from Spotify.")).toBeTruthy();
+    expect(onPlayed).toHaveBeenCalled();
+    const radio = calls.find((call) => call.url.endsWith("/api/groups/g1/song-radio"));
+    expect(JSON.parse(radio?.body ?? "{}")).toEqual({ title: "Elsewhere", artist: "Spotify Connect Artist" });
   });
 
   it("loads nothing while it's folded away", () => {
