@@ -39,7 +39,9 @@ export function createServer(config: YtmConfig): http.Server {
       if (request.method === "GET" && url.pathname === "/track") {
         const rawId = url.searchParams.get("id");
         if (!rawId) return sendJson(response, 400, { error: "Missing id" });
-        return sendJson(response, 200, await resolveTrack(rawId));
+        // stream=0: metadata only (the bridge enqueuing a playlist); the stream is found
+        // when Sonos opens the track.
+        return sendJson(response, 200, await resolveTrack(rawId, url.searchParams.get("stream") !== "0"));
       }
       if (request.method === "GET" && url.pathname === "/auth/status") {
         // Personalized browse (Library/Supermix) and signed-in-only streams use
@@ -92,12 +94,12 @@ async function runSearchResponse(query: string, type: "song" | "artist" | "album
   };
 }
 
-async function resolveTrack(rawId: string): Promise<SourceTrackInfo> {
+async function resolveTrack(rawId: string, withStream = true): Promise<SourceTrackInfo> {
   const id = decodeId(rawId);
   if (id.kind !== "track") throw new Error("Bad id for track");
   const [meta, stream] = await Promise.all([
     getTrackInfo(id.videoId),
-    getStreamUrl(id.videoId)
+    withStream ? getStreamUrl(id.videoId) : undefined
   ]);
   return {
     id: rawId,
@@ -106,8 +108,9 @@ async function resolveTrack(rawId: string): Promise<SourceTrackInfo> {
     album: meta?.album,
     durationSeconds: meta?.durationSeconds,
     albumArtUri: meta?.thumbnailUrl,
-    url: stream.url,
-    mimeType: stream.mimeType ?? "audio/mp4"
+    url: stream?.url ?? "",
+    // yt-dlp picks AAC whenever a video has it, so that is the safe guess before a lookup.
+    mimeType: stream?.mimeType ?? "audio/mp4"
   };
 }
 

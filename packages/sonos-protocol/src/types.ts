@@ -323,7 +323,7 @@ export interface SourceTrackInfo {
   album?: string;
   durationSeconds?: number;
   albumArtUri?: string;
-  url: string;
+  url: string; // empty when the bridge asked for metadata only (/track?stream=0)
   mimeType?: string;
   isLive?: boolean; // live, non-seekable stream (internet radio)
 }

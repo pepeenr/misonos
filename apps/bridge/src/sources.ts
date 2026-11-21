@@ -139,10 +139,19 @@ export async function appendToSourcePlaylist(sourceId: string, name: string, tra
   });
 }
 
-export async function fetchTrack(sourceId: string, id: string): Promise<SourceTrackInfo> {
+/**
+ * A track's metadata and stream URL. With `stream: false` a source may skip finding the
+ * stream (YouTube Music runs yt-dlp for it) and answer with an empty `url`; sources that
+ * find it cheaply ignore the flag. Use it only where the URL isn't needed.
+ */
+export async function fetchTrack(sourceId: string, id: string, options: { stream?: boolean } = {}): Promise<SourceTrackInfo> {
   const config = requireConfig(sourceId);
   const target = new URL("/track", config.baseUrl);
   target.searchParams.set("id", id);
+  if (options.stream === false) {
+    target.searchParams.set("stream", "0");
+    return fetchJson<SourceTrackInfo>(target);
+  }
   return fetchJson<SourceTrackInfo>(target, undefined, TRACK_TIMEOUT_MS);
 }
 
