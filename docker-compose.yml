@@ -75,6 +75,9 @@ services:
       MISONOS_YTM_PORT: "4321"
       # Pasted YT Music cookies (Library/My Supermix) persist here across restarts.
       YTMUSIC_COOKIES_PATH: "/data/ytmusic-cookies.json"
+      # Streams resolve through yt-dlp; let the service update it daily (and after a
+      # resolve fails) so a YouTube change is fixed without waiting for a deploy.
+      YTDLP_AUTO_UPDATE: "1"
     volumes:
       - ./data:/data
 

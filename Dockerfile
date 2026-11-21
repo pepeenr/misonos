@@ -23,6 +23,17 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
+# ---- yt-dlp: resolves YouTube Music stream URLs (apps/ytmusic-smapi/src/ytdlp.ts) ----
+# The standalone build bundles Python and its JS challenge solver; the Node in the
+# runtime image runs the challenges. ADD of a URL is re-checked on every build, so each
+# deploy ships the newest release (YouTube changes often and yt-dlp keeps up). Only the
+# stage for the platform being built is used.
+FROM scratch AS ytdlp-amd64
+ADD --chmod=755 https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux /yt-dlp
+FROM scratch AS ytdlp-arm64
+ADD --chmod=755 https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64 /yt-dlp
+FROM ytdlp-${TARGETARCH} AS ytdlp
+
 # ---- node-runtime: the backend services (bridge + SMAPI sources) ----
 FROM node:22-bookworm-slim AS node-runtime
 ENV NODE_ENV=production
@@ -36,6 +47,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps ./apps
 COPY --from=build /app/package.json ./package.json
+COPY --from=ytdlp /yt-dlp /usr/local/bin/yt-dlp
 # Overridden per-service by docker-compose; bridge is the sensible default.
 CMD ["node", "apps/bridge/dist/index.js"]
 

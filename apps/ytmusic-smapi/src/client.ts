@@ -1,6 +1,7 @@
 import { createContext, Script } from "node:vm";
 import { Innertube, Log, Platform } from "youtubei.js";
 import { getCookieString } from "./cookieAuth.js";
+import { requestYtDlpUpdate, resolveWithYtDlp, withCookieFile, YtDlpMissingError, type YtDlpStream } from "./ytdlp.js";
 
 // Silence non-fatal parser warnings (TicketEvent submenu types YT keeps adding).
 // Real failures still throw and reach our endpoint handlers.
@@ -47,25 +48,6 @@ export async function getClient(): Promise<Innertube> {
   return initPromise;
 }
 
-let authedClient: Innertube | undefined;
-let authedCookieKey: string | undefined;
-
-// A youtubei.js client carrying the pasted cookies, rebuilt if the cookie changes.
-// Used only as a stream fallback for signed-in-only content (podcast episodes).
-async function getAuthedClient(): Promise<Innertube | null> {
-  const cookie = getCookieString();
-  if (!cookie) return null;
-  if (authedClient && authedCookieKey === cookie) return authedClient;
-  try {
-    authedClient = await Innertube.create({ retrieve_player: true, cookie });
-    authedCookieKey = cookie;
-    return authedClient;
-  } catch (error) {
-    console.warn(`[ytmusic] failed to build authed client: ${error instanceof Error ? error.message : error}`);
-    return null;
-  }
-}
-
 interface RawSongResult {
   id?: string;
   title?: string | { text?: string };
@@ -87,61 +69,119 @@ export async function searchSongs(query: string, limit = 30): Promise<YtmSearchT
     .slice(0, limit);
 }
 
-export async function getStreamUrl(videoId: string): Promise<YtmStreamInfo> {
-  // The default WEB client requires a Proof-of-Origin token before googlevideo will
-  // serve audio. Try alternate clients that historically don't need PO tokens, and
-  // validate each candidate URL with a HEAD request before returning it.
-  const anon = await getClient();
-  const fromAnon = await resolveStream(anon, videoId, "anon");
-  if (fromAnon.url) return { url: fromAnon.url, mimeType: fromAnon.mimeType };
+// A resolved URL is good until its `expire` (about 6 h out). Sonos asks again when it
+// opens the stream, and a playlist enqueue asks for the same tracks, so keep them.
+const STREAM_CACHE_MAX = 500;
+const streamCache = new Map<string, { stream: YtmStreamInfo; until: number }>();
+const pendingStreams = new Map<string, Promise<YtmStreamInfo>>();
 
-  // Podcast episodes (and some gated tracks) only resolve for a signed-in session,
-  // so retry with an authenticated client built from the pasted cookies.
-  const authed = await getAuthedClient();
-  if (authed) {
-    const fromAuthed = await resolveStream(authed, videoId, "authed");
-    if (fromAuthed.url) return { url: fromAuthed.url, mimeType: fromAuthed.mimeType };
-    if (fromAuthed.error) throw fromAuthed.error;
+export async function getStreamUrl(videoId: string): Promise<YtmStreamInfo> {
+  const cached = streamCache.get(videoId);
+  if (cached && cached.until > Date.now()) {
+    // Still check it: a new public IP (the URL is bound to it) voids every cached URL.
+    if (await urlIsPlayable(cached.stream.url)) return cached.stream;
+    streamCache.delete(videoId);
   }
-  throw fromAnon.error ?? new Error("All stream clients failed");
+  const pending = pendingStreams.get(videoId);
+  if (pending) return pending;
+  const job = resolveStream(videoId)
+    .then((stream) => {
+      rememberStream(videoId, stream);
+      return stream;
+    })
+    .finally(() => pendingStreams.delete(videoId));
+  pendingStreams.set(videoId, job);
+  return job;
 }
 
-// Innertube player clients that historically serve audio without a PO token,
-// ordered by what currently works (the gated TV_* clients sit at the back). YouTube
-// rotates which clients it gates, so we also remember the last client that produced
-// a playable URL and try it first — that keeps the common case to a single attempt
-// (~1s) instead of burning seconds failing over gated clients, which can stall
-// Sonos's stream start past its timeout.
-const STREAM_CLIENTS = ["ANDROID_VR", "IOS", "TV_EMBEDDED", "TV_SIMPLY", "ANDROID", "WEB_EMBEDDED"] as const;
-type StreamClient = (typeof STREAM_CLIENTS)[number];
-let lastGoodClient: StreamClient | undefined;
+function rememberStream(videoId: string, stream: YtmStreamInfo): void {
+  const now = Date.now();
+  for (const [key, entry] of streamCache) {
+    if (entry.until <= now || streamCache.size >= STREAM_CACHE_MAX) streamCache.delete(key);
+  }
+  streamCache.set(videoId, { stream, until: cacheUntil(stream.url, now) });
+}
 
-async function resolveStream(yt: Innertube, videoId: string, label: string): Promise<{ url?: string; mimeType?: string; error?: Error }> {
-  // Sticky client first (if any), then the rest — deduped.
-  const order = [lastGoodClient, ...STREAM_CLIENTS].filter(
-    (client, index, all): client is StreamClient => !!client && all.indexOf(client) === index
-  );
+/** Ten minutes before the URL's `expire`, so a stream Sonos opens late still lasts. */
+export function cacheUntil(url: string, now = Date.now()): number {
+  const expire = Number(new URL(url).searchParams.get("expire"));
+  const fallback = now + 60 * 60 * 1000;
+  if (!Number.isFinite(expire) || expire <= 0) return fallback;
+  return Math.max(now, expire * 1000 - 10 * 60 * 1000);
+}
+
+interface StreamAttempt {
+  label: string;
+  playerClient?: string;
+  signedIn?: boolean;
+}
+
+// visionos needs no JS challenges and gets no pre-roll ad, so it answers in ~2–4 s with
+// a URL that streams at once. yt-dlp's own default clients come next: slower (they wait
+// out the ad) but they are what yt-dlp keeps working. If visionos keeps failing, skip
+// it for a while rather than paying for it on every track.
+const FAST_CLIENT = "visionos";
+const FAST_CLIENT_STRIKES = 3;
+const FAST_CLIENT_REST_MS = 30 * 60 * 1000;
+let fastClientStrikes = 0;
+let fastClientRestUntil = 0;
+// A longer ad than this would outlast the bridge's patience; try the next attempt.
+const MAX_AD_WAIT_MS = 15_000;
+
+async function resolveStream(videoId: string): Promise<YtmStreamInfo> {
+  const attempts: StreamAttempt[] = [];
+  if (Date.now() >= fastClientRestUntil) attempts.push({ label: FAST_CLIENT, playerClient: FAST_CLIENT });
+  attempts.push({ label: "default clients" });
+  // Podcast episodes (and some gated tracks) stream only for a signed-in session.
+  if (getCookieString()) attempts.push({ label: "signed in", signedIn: true });
+
   let lastError: Error | undefined;
-  for (const client of order) {
+  for (const attempt of attempts) {
+    const started = Date.now();
     try {
-      const info = await yt.getInfo(videoId, { client });
-      const format = info.chooseFormat({ type: "audio", quality: "best" });
-      if (!format) continue;
-      const decipheredUrl = await format.decipher(yt.session.player);
-      if (await urlIsPlayable(decipheredUrl)) {
-        if (lastGoodClient !== client) console.log(`[ytmusic] using client=${client} (${label})`);
-        lastGoodClient = client;
-        return { url: decipheredUrl, mimeType: format.mime_type ?? "audio/mp4" };
+      const stream = await runAttempt(videoId, attempt);
+      if (await waitUntilPlayable(stream)) {
+        if (attempt.playerClient === FAST_CLIENT) fastClientStrikes = 0;
+        console.log(`[ytmusic] ${videoId}: yt-dlp (${attempt.label}) itag ${stream.formatId ?? "?"} in ${Date.now() - started} ms`);
+        return { url: stream.url, mimeType: stream.mimeType };
       }
-      console.log(`[ytmusic] client=${client} (${label}) returned URL that failed HEAD`);
+      lastError = new Error(`yt-dlp (${attempt.label}) returned a URL that failed the HEAD check`);
     } catch (error) {
+      if (error instanceof YtDlpMissingError) throw error;
       lastError = error instanceof Error ? error : new Error(String(error));
-      console.log(`[ytmusic] client=${client} (${label}) errored: ${lastError.message}`);
+    }
+    console.log(`[ytmusic] ${videoId}: yt-dlp (${attempt.label}) failed after ${Date.now() - started} ms: ${lastError.message}`);
+    if (attempt.playerClient === FAST_CLIENT && ++fastClientStrikes >= FAST_CLIENT_STRIKES) {
+      fastClientStrikes = 0;
+      fastClientRestUntil = Date.now() + FAST_CLIENT_REST_MS;
+      console.log(`[ytmusic] ${FAST_CLIENT} keeps failing; using yt-dlp's default clients for ${FAST_CLIENT_REST_MS / 60_000} min`);
     }
   }
-  // The sticky client just failed end-to-end — clear it so the next call re-probes.
-  lastGoodClient = undefined;
-  return { error: lastError };
+  requestYtDlpUpdate();
+  throw lastError ?? new Error("No stream found");
+}
+
+function runAttempt(videoId: string, attempt: StreamAttempt): Promise<YtDlpStream> {
+  const cookie = attempt.signedIn ? getCookieString() : null;
+  if (!cookie) return resolveWithYtDlp(videoId, { playerClient: attempt.playerClient });
+  return withCookieFile(cookie, (cookieFile) => resolveWithYtDlp(videoId, { playerClient: attempt.playerClient, cookieFile }));
+}
+
+/** Sits out the pre-roll ad, then HEAD-checks the URL so a bad one never reaches Sonos. */
+async function waitUntilPlayable(stream: YtDlpStream): Promise<boolean> {
+  const adWaitMs = stream.availableAt ? stream.availableAt * 1000 - Date.now() : 0;
+  if (adWaitMs > MAX_AD_WAIT_MS) return false;
+  if (adWaitMs > 0) await sleep(adWaitMs);
+  // available_at is whole seconds and googlevideo's clock is its own: allow a little slack.
+  for (let check = 0; check < 3; check++) {
+    if (check > 0) await sleep(1500);
+    if (await urlIsPlayable(stream.url)) return true;
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function urlIsPlayable(url: string): Promise<boolean> {
