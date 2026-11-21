@@ -76,6 +76,9 @@ const FETCH_TIMEOUT_MS = 8000;
 // Browse can fan out into many sequential upstream calls (e.g. YouTube Music's
 // Supermix pages a radio across ~9 requests), so give it more headroom.
 const BROWSE_TIMEOUT_MS = 30000;
+// Resolving a YouTube Music stream runs yt-dlp (2-5 s) and can then sit out YouTube's
+// pre-roll ad before the URL plays, so a track gets the same headroom.
+const TRACK_TIMEOUT_MS = 30000;
 const infoCache = new Map<string, SourceDescriptor>();
 
 export function listSourceConfigs(): SourceConfig[] {
@@ -140,7 +143,7 @@ export async function fetchTrack(sourceId: string, id: string): Promise<SourceTr
   const config = requireConfig(sourceId);
   const target = new URL("/track", config.baseUrl);
   target.searchParams.set("id", id);
-  return fetchJson<SourceTrackInfo>(target);
+  return fetchJson<SourceTrackInfo>(target, undefined, TRACK_TIMEOUT_MS);
 }
 
 /** The main artist of a Spotify track, from the Spotify source (needs its sign-in). */
