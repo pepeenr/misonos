@@ -3,6 +3,8 @@ import { cookieAuthHeaders, invalidateCookieAuth } from "./cookieAuth.js";
 const YTM_DOMAIN = "https://music.youtube.com";
 const YTM_API_BASE = `${YTM_DOMAIN}/youtubei/v1/`;
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:88.0) Gecko/20100101 Firefox/88.0";
+/** "Reject all" on YouTube's cookie consent page, as yt-dlp and ytmusicapi send it. */
+export const CONSENT_COOKIE = "SOCS=CAI";
 
 let visitorIdPromise: Promise<string> | null = null;
 
@@ -21,7 +23,10 @@ async function getVisitorId(): Promise<string> {
       headers: {
         "User-Agent": USER_AGENT,
         "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.5"
+        "Accept-Language": "en-US,en;q=0.5",
+        // In the EU and Switzerland the page redirects to YouTube's cookie consent page,
+        // which has no ytcfg. This cookie declines the consent, so the page itself comes.
+        "Cookie": CONSENT_COOKIE
       }
     });
     const text = await response.text();

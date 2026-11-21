@@ -1,6 +1,7 @@
 import type { Alarm, AlarmInput, BridgeEvent, BridgeSnapshot, BrowseResult, CustomServicePresetView, EqPayload, EqPreset, EqState, Favorite, MusicServiceDiscovery, NowPlaying, PlaybackMode, PlayHistoryEntry, Playlist, PlaylistItem, Preference, QueueItem, RecentlyPlayedItem, RecentlyViewedItem, RecentQueue, RegisterCustomServiceResult, RepeatMode, SonosAccountsResponse, SonosDeviceInfo, SonosGroup, SonosZone, SourceBrowseResponse, SourceDescriptor, SourceItemKind, SourceLoginStatus, SourceSetting, SpotifyAccountsView, SpotifyAuthStatus, SpotifyClientStatus, TransportAction, VolumePayload, VolumeState, YouTubeImportJob, YouTubeImportStatus, YouTubeLinkPreview } from "@misonos/sonos-protocol";
 import { noteBridgeFailure } from "./accessSession.js";
 import { apiUrl } from "./servers.js";
+import type { SongRadioResult, SongRadioSeed } from "./songRadio.js";
 
 export interface AddPlaylistItemInput {
   id: string;
@@ -204,6 +205,12 @@ export const bridgeApi = {
   /** Spotify radio for the artist of the Spotify song playing now. */
   startSpotifyRadio: (groupId: string) =>
     request<{ artist: { id: string; name: string }; nowPlaying: NowPlaying }>(`/api/groups/${encodeURIComponent(groupId)}/spotify-radio`, { method: "POST", body: "{}" }, 30_000),
+  /**
+   * Song radio: songs like one song, replacing the queue. Without `song`, from the song
+   * playing now, which carries on when it plays from the queue.
+   */
+  startSongRadio: (groupId: string, song?: SongRadioSeed) =>
+    request<SongRadioResult>(`/api/groups/${encodeURIComponent(groupId)}/song-radio`, { method: "POST", body: JSON.stringify(song ?? {}) }, 90_000),
   sourceSubscriptions: (sourceId: string) =>
     request<{ ids: string[] }>(`/api/sources/${encodeURIComponent(sourceId)}/subscriptions`),
   pinSource: (sourceId: string, id: string, pinned: boolean) =>

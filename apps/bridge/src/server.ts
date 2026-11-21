@@ -4,6 +4,7 @@ import type { AlarmInput, BridgeEvent, EqPayload, EqPreset, Favorite, NowPlaying
 import type { BridgeConfig } from "./config.js";
 import { PlayHistoryRecorder } from "./playHistory.js";
 import { QueueReturn } from "./queueReturn.js";
+import { SongRadioError, startSongRadio, type SongRadioPlayer, type SongRadioRequest, type SongRadioSources } from "./songRadio.js";
 import { spotifyTrackFromSonosUri } from "./spotifySonos.js";
 import { pickSelectedGroup, SELECTED_GROUP_PREF, stepVolume } from "./selectedRoom.js";
 import { SonosEventManager } from "./sonosEvents.js";
@@ -112,6 +113,21 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     }
   });
   service.onEnqueue = (event) => queueReturn.onEnqueue(event.groupId, event);
+
+  // Song radio: YouTube Music makes the list, Spotify and Navidrome play it.
+  const songRadioSources: SongRadioSources = {
+    browse: async (sourceId, id) => (await service.browseSource(sourceId, id)).items,
+    search: async (sourceId, query) => (await service.searchSource(sourceId, query, "song")).items,
+    available: async () => (await service.listSources(await readDisabledSources(store))).map((source) => source.id)
+  };
+  const songRadioPlayer: SongRadioPlayer = {
+    nowPlaying: (groupId) => service.nowPlaying(groupId),
+    refFromNowPlaying: (nowPlaying) => service.refFromNowPlaying(nowPlaying),
+    queuePosition: (groupId) => service.queuePosition(groupId),
+    replaceUpcoming: (groupId, refs) => service.replaceUpcoming(groupId, refs),
+    play: (groupId, refs) => service.playTrackRefs(refs, groupId, "replace"),
+    seek: (groupId, seconds) => service.seekToPosition(groupId, seconds)
+  };
 
   // Every song as it starts in a room, for the main screen's History.
   const playHistory = new PlayHistoryRecorder({
@@ -603,6 +619,22 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
       const nowPlaying = await service.playSpotifyArtistRadio(groupId, artist, await service.spotifyAccountForUri(current.uri));
       sendEvent({ type: "now-playing", payload: nowPlaying, at: new Date().toISOString() });
       return json(response, { artist, nowPlaying });
+    }
+
+    // Song radio: songs like one song, from a list (a title in the body) or the song
+    // playing now (no title). See songRadio.ts.
+    const songRadioMatch = url.pathname.match(/^\/api\/groups\/([^/]+)\/song-radio$/);
+    if (request.method === "POST" && songRadioMatch) {
+      const groupId = decodeURIComponent(songRadioMatch[1]);
+      const body = await readJson<SongRadioRequest>(request);
+      try {
+        const result = await startSongRadio(groupId, body, { sources: songRadioSources, player: songRadioPlayer });
+        sendEvent({ type: "now-playing", payload: result.nowPlaying, at: new Date().toISOString() });
+        return json(response, result);
+      } catch (error) {
+        if (error instanceof SongRadioError) return json(response, { error: error.message }, error.status);
+        throw error;
+      }
     }
 
     const sourceSubsMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/subscriptions$/);

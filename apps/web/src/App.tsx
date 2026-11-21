@@ -1,10 +1,11 @@
-import { AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
+import { AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RadioTower, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { Fragment, lazy, Suspense, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, PlayHistoryChange, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
 import { startAccessSignIn, useAccessSignedOut } from "./accessSession.js";
 import { artSrc, bridgeApi, subscribeBridgeEvents } from "./api.js";
+import { songRadioMessage } from "./songRadio.js";
 import { apiUrl } from "./servers.js";
 import { AddToPlaylistModal } from "./AddToPlaylistModal.js";
 import { Alarms } from "./Alarms.js";
@@ -33,8 +34,7 @@ import { PlaylistsPanel } from "./PlaylistsPanel.js";
 import { BrowseFolder } from "./BrowseFolder.js";
 import { readOpenFolders, saveOpenFolders } from "./musicFolders.js";
 import { HistoryPanel } from "./HistoryPanel.js";
-import { SpotifyNowPlaying } from "./SpotifyNowPlaying.js";
-import { spotifyLoginOfUri } from "./spotifyLogins.js";
+import { NowPlayingActions } from "./NowPlayingActions.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
 import { MiniPlayer, ViewTabs } from "./Navigation.js";
@@ -1071,8 +1071,8 @@ export function App() {
             <p className="eyebrow">{localMode ? "ON THIS DEVICE" : effectiveNowPlaying?.state ?? "UNKNOWN"}</p>
             <h2>{effectiveNowPlaying?.title ?? "Nothing selected"}</h2>
             <p>{[effectiveNowPlaying?.artist, effectiveNowPlaying?.album].filter(Boolean).join(" - ")}</p>
-            {!localMode && selectedGroup && nowPlaying && spotifyLoginOfUri(nowPlaying.uri) ? (
-              <SpotifyNowPlaying groupId={selectedGroup.id} nowPlaying={nowPlaying} onPlayed={onPlaylistPlayed} />
+            {!localMode && selectedGroup && nowPlaying ? (
+              <NowPlayingActions groupId={selectedGroup.id} nowPlaying={nowPlaying} onPlayed={onPlaylistPlayed} />
             ) : null}
             {/* Live streams (e.g. TuneIn radio) report no duration and can't be
                 seeked, so the scrub bar would be meaningless — hide it entirely. */}
@@ -1883,6 +1883,28 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
     }
   }, [sourceId, selectedGroupId, buildLocalTracks, localPlayer, sonosOnly, activeSource?.name, browseProfile]);
 
+  // Song radio from a song in the list: that song, then songs like it, in place of the queue.
+  const startRadio = useCallback(async (item: SourceBrowseItem) => {
+    if (!sourceId || !selectedGroupId) {
+      setStatus({ ok: false, message: "Pick a target first." });
+      return;
+    }
+    if (selectedGroupId === LOCAL_DEVICE_ID) {
+      setStatus({ ok: false, message: "A song radio plays on the speakers: pick a room first." });
+      return;
+    }
+    setPlaying(`${item.id}:radio`);
+    setStatus({ ok: true, message: `Finding songs like “${item.title}”…` });
+    try {
+      const result = await bridgeApi.startSongRadio(selectedGroupId, { sourceId, trackId: item.id, title: item.title, artist: item.artist });
+      setStatus({ ok: true, message: songRadioMessage(result) });
+    } catch (err) {
+      setStatus({ ok: false, message: err instanceof Error ? err.message : "Couldn't start the song radio" });
+    } finally {
+      setPlaying(null);
+    }
+  }, [sourceId, selectedGroupId]);
+
   // At the top of a source, its plain folders open in place (BrowseFolder); deeper down,
   // and in search results, a folder opens as its own list with a path back.
   const atRoot = stack.length === 0 && !searchActive;
@@ -2228,6 +2250,17 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
             <button type="button" className="action-menu-item" onClick={() => { void enqueueItem(menu.item, "end"); setMenu(null); }}>
               <ListEnd size={16} /> <span className="action-menu-item-label"><span>Add to end</span></span>
             </button>
+            {menu.item.kind === "playable" && !menu.item.isLive ? (
+              <button
+                type="button"
+                className="action-menu-item"
+                title="This song, then songs like it, in place of the queue"
+                disabled={playing !== null}
+                onClick={() => { void startRadio(menu.item); setMenu(null); }}
+              >
+                <RadioTower size={16} /> <span className="action-menu-item-label"><span>Start radio</span></span>
+              </button>
+            ) : null}
             <button type="button" className="action-menu-item" onClick={() => { void toggleFavorite(menu.item); setMenu(null); }}>
               <Heart size={16} fill={isFavorited(menu.item) ? "currentColor" : "none"} />
               <span className="action-menu-item-label"><span>{isFavorited(menu.item) ? "Unfavorite" : "Favorite"}</span></span>

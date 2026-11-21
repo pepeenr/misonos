@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NowPlaying, SonosSpotifyAccount } from "@misonos/sonos-protocol";
-import { SpotifyNowPlaying } from "./SpotifyNowPlaying.js";
+import { NowPlayingActions } from "./NowPlayingActions.js";
 import { isSpotifySongUri, loginChoices, spotifyLoginOfUri } from "./spotifyLogins.js";
 
 const login = (sn: number, name?: string): SonosSpotifyAccount => ({ sid: 9, sn, token: `SA_RINCON2311_X_#Svc2311-${sn}-Token`, seenOn: [], uses: 1, name });
@@ -25,7 +25,7 @@ describe("Spotify logins", () => {
   });
 });
 
-describe("the Spotify controls under the song", () => {
+describe("the controls under the song", () => {
   let posts: { url: string; body: unknown }[];
 
   beforeEach(() => {
@@ -37,6 +37,7 @@ describe("the Spotify controls under the song", () => {
       const playing = { groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() };
       if (url.endsWith("/spotify-account")) return json({ moved: 4, nowPlaying: { ...playing, uri: SONG_ON_PEPE.replace("sn=3", "sn=5") } });
       if (url.endsWith("/spotify-radio")) return json({ artist: { id: "ART", name: "Sofi Tukker" }, nowPlaying: playing });
+      if (url.endsWith("/song-radio")) return json({ seed: { title: "Song", artist: "Sofi Tukker" }, songs: 25, from: ["spotify"], upNext: true, nowPlaying: playing });
       return json({});
     }));
   });
@@ -47,7 +48,7 @@ describe("the Spotify controls under the song", () => {
 
   it("switches the music to Mia's login", async () => {
     const onPlayed = vi.fn();
-    render(<SpotifyNowPlaying groupId="g1" nowPlaying={nowPlaying} onPlayed={onPlayed} />);
+    render(<NowPlayingActions groupId="g1" nowPlaying={nowPlaying} onPlayed={onPlayed} />);
     const select = await screen.findByRole("combobox", { name: "Spotify login" });
     expect([...(select as HTMLSelectElement).options].map((option) => option.textContent)).toEqual(["Pepe", "Mia"]);
     expect((select as HTMLSelectElement).value).toBe("9:3");
@@ -59,7 +60,7 @@ describe("the Spotify controls under the song", () => {
 
   it("starts the artist's Spotify radio from the song", async () => {
     const onPlayed = vi.fn();
-    render(<SpotifyNowPlaying groupId="g1" nowPlaying={nowPlaying} onPlayed={onPlayed} />);
+    render(<NowPlayingActions groupId="g1" nowPlaying={nowPlaying} onPlayed={onPlayed} />);
     fireEvent.click(screen.getByRole("button", { name: "Artist radio" }));
     expect(await screen.findByText("Playing Sofi Tukker Radio.")).toBeTruthy();
     expect(posts[0].url).toContain("/api/groups/g1/spotify-radio");
@@ -67,8 +68,27 @@ describe("the Spotify controls under the song", () => {
   });
 
   it("has no radio button while Spotify radio already plays", async () => {
-    render(<SpotifyNowPlaying groupId="g1" nowPlaying={{ ...nowPlaying, uri: "x-sonosapi-radio:spotify%3aartistRadio%3aART?sid=9&flags=8300&sn=3" }} onPlayed={() => {}} />);
+    render(<NowPlayingActions groupId="g1" nowPlaying={{ ...nowPlaying, uri: "x-sonosapi-radio:spotify%3aartistRadio%3aART?sid=9&flags=8300&sn=3" }} onPlayed={() => {}} />);
     await screen.findByRole("combobox", { name: "Spotify login" });
     expect(screen.queryByRole("button", { name: "Artist radio" })).toBeNull();
+  });
+
+  it("starts a radio of songs like the one playing, which carries on", async () => {
+    const onPlayed = vi.fn();
+    render(<NowPlayingActions groupId="g1" nowPlaying={{ ...nowPlaying, artist: "Sofi Tukker" }} onPlayed={onPlayed} />);
+    fireEvent.click(screen.getByRole("button", { name: "Song radio" }));
+    expect(await screen.findByText("Radio from “Song” comes after this song: 25 songs from Spotify.")).toBeTruthy();
+    expect(posts).toEqual([{ url: expect.stringContaining("/api/groups/g1/song-radio"), body: {} }]);
+    expect(onPlayed).toHaveBeenCalled();
+  });
+
+  it("offers a song radio for any song, but not for a station or a song without an artist", () => {
+    const { rerender, container } = render(<NowPlayingActions groupId="g1" nowPlaying={{ ...nowPlaying, artist: "Pixies", uri: "http://10.0.0.2:4317/api/stream/navidrome/abc/x.mp3" }} onPlayed={() => {}} />);
+    expect(screen.getByRole("button", { name: "Song radio" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Artist radio" })).toBeNull();
+    rerender(<NowPlayingActions groupId="g1" nowPlaying={{ ...nowPlaying, artist: "SRF 3", uri: "x-sonosapi-stream:s24861?sid=254&sn=0", isLive: true }} onPlayed={() => {}} />);
+    expect(container.innerHTML).toBe("");
+    rerender(<NowPlayingActions groupId="g1" nowPlaying={{ ...nowPlaying, uri: "http://10.0.0.2:4317/api/stream/navidrome/abc/x.mp3" }} onPlayed={() => {}} />);
+    expect(container.innerHTML).toBe("");
   });
 });

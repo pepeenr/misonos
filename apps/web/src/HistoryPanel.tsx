@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ListEnd, Play, Radio, Trash2, X } from "lucide-react";
+import { ListEnd, Play, Radio, RadioTower, Trash2, X } from "lucide-react";
 import type { NowPlaying, PlaybackMode, PlayHistoryChange, PlayHistoryEntry } from "@misonos/sonos-protocol";
 import { artSrc, bridgeApi } from "./api.js";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { useDialogs } from "./dialogs.js";
 import { applyChange, byDay } from "./history.js";
+import { songRadioMessage } from "./songRadio.js";
 
 interface HistoryPanelProps {
   /** The Sonos group to play on; unset when no room is picked. */
@@ -46,7 +47,8 @@ export function HistoryPanel({ groupId, localMode, collapsed, onToggleCollapsed,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  // A sticky status stays until the next one (a song radio still being put together).
+  const [status, setStatus] = useState<{ ok: boolean; message: string; sticky?: boolean } | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
 
   // Load the newest page when the card opens, and again when the app comes back to the
@@ -82,7 +84,7 @@ export function HistoryPanel({ groupId, localMode, collapsed, onToggleCollapsed,
   }, [change]);
 
   useEffect(() => {
-    if (!status) return undefined;
+    if (!status || status.sticky) return undefined;
     const timeout = window.setTimeout(() => setStatus(null), status.ok ? 3500 : 6000);
     return () => window.clearTimeout(timeout);
   }, [status]);
@@ -114,6 +116,28 @@ export function HistoryPanel({ groupId, localMode, collapsed, onToggleCollapsed,
       setStatus({ ok: true, message: mode === "replace" ? `Playing “${entry.title}”.` : `Added “${entry.title}” to the queue.` });
     } catch (err) {
       setStatus({ ok: false, message: err instanceof Error ? err.message : "Couldn't play it" });
+    } finally {
+      setBusyId(null);
+    }
+  }, [groupId, localMode, onPlayed]);
+
+  // That song, then songs like it, in place of the queue. Also for a song MiSonos can't
+  // play itself (from another app): the radio needs only its artist and title.
+  const startRadio = useCallback(async (entry: PlayHistoryEntry) => {
+    if (!groupId || localMode) { setStatus({ ok: false, message: "Pick a room first." }); return; }
+    setBusyId(entry.id);
+    setStatus({ ok: true, message: `Finding songs like “${entry.title}”…`, sticky: true });
+    try {
+      const result = await bridgeApi.startSongRadio(groupId, {
+        title: entry.title,
+        artist: entry.artist ?? undefined,
+        sourceId: entry.sourceId ?? undefined,
+        trackId: entry.trackId ?? undefined
+      });
+      onPlayed(result.nowPlaying);
+      setStatus({ ok: true, message: songRadioMessage(result) });
+    } catch (err) {
+      setStatus({ ok: false, message: err instanceof Error ? err.message : "Couldn't start the song radio" });
     } finally {
       setBusyId(null);
     }
@@ -178,6 +202,7 @@ export function HistoryPanel({ groupId, localMode, collapsed, onToggleCollapsed,
                     {day.entries.map((entry) => {
                       const playedAt = new Date(entry.playedAt);
                       const playable = !!entry.sourceId && !!entry.trackId;
+                      const radio = !entry.isLive && !!entry.title && !!entry.artist;
                       const subtitle = [entry.artist, entry.album].filter(Boolean).join(" - ") || (entry.isLive ? "Radio" : "");
                       return (
                         <li key={entry.id} className="queue-item history-item">
@@ -192,6 +217,21 @@ export function HistoryPanel({ groupId, localMode, collapsed, onToggleCollapsed,
                               <small title={entry.rooms}>{entry.rooms}</small>
                             </span>
                           </div>
+                          {radio ? (
+                            <button
+                              type="button"
+                              className="queue-action"
+                              title={playDisabledTitle ?? "Song radio: this song, then songs like it, in place of the queue"}
+                              aria-label={`Start a radio from ${entry.title}`}
+                              disabled={busyId !== null || !groupId || localMode}
+                              aria-busy={busyId === entry.id || undefined}
+                              onClick={() => void startRadio(entry)}
+                            >
+                              <RadioTower size={15} />
+                            </button>
+                          ) : (
+                            <span className="history-radio-spacer" aria-hidden="true" />
+                          )}
                           {playable ? (
                             <>
                               <button

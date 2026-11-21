@@ -943,53 +943,7 @@ export class SonosService {
     if (refs.length === 0) throw new Error("trackIds must be non-empty");
     const group = await this.requireGroup(groupId);
     const coordinator = await this.requireZone(group.coordinatorId);
-    const tracks = await Promise.all(refs.map((ref) => fetchTrack(ref.sourceId, ref.trackId).catch((error: unknown): SourceTrackInfo => {
-      // A Spotify URI plays through Sonos's own Spotify link, so it still plays when the
-      // source can't describe it (signed out, Web API down): Sonos fills in the metadata.
-      if (ref.sourceId === SPOTIFY_SOURCE_ID && isSpotifyUri(ref.trackId)) {
-        return { id: ref.trackId, title: "", url: ref.trackId };
-      }
-      throw error;
-    })));
-    tracks.forEach((track, index) => {
-      if (track.title) this.smapiTrackMeta.set(`${refs[index].sourceId}\n${refs[index].trackId}`, track);
-    });
-    const spotify = tracks.some((track) => isSpotifyUri(track.url)) ? await this.spotifyPlaybackAccount() : undefined;
-    const bridgeHost = this.publicHost();
-    if (!bridgeHost) throw new Error("Could not determine bridge LAN IP for stream proxy");
-    // S1 firmware drops DIDL metadata on plain-http audio/mp4 URIs, so SMAPI
-    // sources (YT Music) must go out as x-sonos-http:…sid= there — which only
-    // resolves once the service is registered via the speaker's customsd page.
-    // S2 firmware (a) honors buildDidl's metadata on plain http — verified on
-    // 86.2: title/artist/album/art all stick — and (b) returns 403 for customsd,
-    // so on S2 we route those sources through the stream proxy like every other
-    // source: full metadata in Now Playing, and no registration required.
-    const coordinatorIsS2 = coordinator.swGen === 2;
-    const queueItems = tracks.map((track, index) => {
-      if (spotify && isSpotifyUri(track.url)) return spotifyQueueItem(track, spotify);
-      const ref = refs[index];
-      const ext = extensionForMime(track.mimeType);
-      const titleSlug = urlSafeSlug(track.title);
-      const proxyUrl = `http://${bridgeHost}:${this.config.port}/api/stream/${encodeURIComponent(ref.sourceId)}/${encodeURIComponent(ref.trackId)}/${titleSlug}${ext}`;
-      // For sources registered as a Sonos SMAPI custom service (sid 240 by
-      // default), use an x-sonos-http URI so Sonos calls our SMAPI endpoint
-      // for the actual URL + metadata. Required for non-mp3 streams
-      // (audio/mp4) where S1 ignores DIDL on plain http URIs.
-      const smapi = SMAPI_SOURCE_INFO[ref.sourceId];
-      if (smapi && !coordinatorIsS2) {
-        // sid here is the raw sid in the URI; serviceTokenMagic (sid*256) is
-        // what goes into the <desc> SA_RINCON binding, not the URI sid.
-        const smapiUri = `x-sonos-http:${encodeURIComponent(ref.trackId)}${ext}?sid=${smapi.sid}&flags=8224&sn=${smapi.sn}`;
-        const metadata = buildSmapiDidl({
-          ...track,
-          id: ref.trackId,
-          url: smapiUri
-        }, smapi);
-        return { uri: smapiUri, metadata };
-      }
-      const proxiedTrack: SourceTrackInfo = { ...track, url: proxyUrl };
-      return { uri: proxyUrl, metadata: buildDidl(proxiedTrack) };
-    });
+    const queueItems = await this.queueItemsFor(refs, coordinator);
 
     let replaced: { items: { sourceId: string; trackId: string }[]; startTrack: number } | undefined;
     let tracksAdded = 0;
@@ -1039,19 +993,117 @@ export class SonosService {
         insertAt += Math.max(1, Number.parseInt(added.NumTracksAdded ?? "1", 10) || 1);
       }
     } else {
-      for (const item of queueItems) {
-        await callSoap(coordinator.ipAddress, "AVTransport", "AddURIToQueue", {
-          InstanceID: 0,
-          EnqueuedURI: item.uri,
-          EnqueuedURIMetaData: item.metadata,
-          DesiredFirstTrackNumberEnqueued: 0,
-          EnqueueAsNext: 0
-        }, ENQUEUE_TIMEOUT_MS);
-      }
+      await this.appendQueueItems(coordinator.ipAddress, queueItems);
     }
 
     this.onEnqueue?.({ groupId, mode, singleTrack: mode === "replace" && tracksAdded === 1 ? refs[0] : undefined, replaced });
     return this.nowPlaying(groupId);
+  }
+
+  /** Where the room is in its queue, when the queue is what it plays (not a stream, Spotify Connect, …). */
+  async queuePosition(groupId: string): Promise<{ track: number; tracks: number } | undefined> {
+    const group = await this.requireGroup(groupId);
+    const coordinator = await this.requireZone(group.coordinatorId);
+    const [media, position] = await Promise.all([
+      callSoap(coordinator.ipAddress, "AVTransport", "GetMediaInfo", { InstanceID: 0 }),
+      callSoap(coordinator.ipAddress, "AVTransport", "GetPositionInfo", { InstanceID: 0 })
+    ]);
+    if (programOfUri(media.CurrentURI ?? "") !== "queue") return undefined;
+    const track = numericPosition(position.Track);
+    const tracks = Number.parseInt(media.NrTracks ?? "0", 10);
+    if (!track || !Number.isFinite(tracks) || tracks < track) return undefined;
+    return { track, tracks };
+  }
+
+  /**
+   * Keeps the song playing and puts `refs` after it, in place of the rest of the queue
+   * (a song radio from the song playing now). The queue is archived first, like a replace.
+   */
+  async replaceUpcoming(groupId: string, refs: { sourceId: string; trackId: string }[]): Promise<NowPlaying> {
+    if (refs.length === 0) throw new Error("No tracks to play");
+    const position = await this.queuePosition(groupId);
+    if (!position) return this.enqueueTrackRefs(refs, groupId, "replace");
+    const group = await this.requireGroup(groupId);
+    const coordinator = await this.requireZone(group.coordinatorId);
+    // Look the songs up before anything leaves the queue, so a failed lookup changes nothing.
+    const queueItems = await this.queueItemsFor(refs, coordinator);
+    await this.archiveQueueBeforeReplace(groupId, coordinator.uuid, coordinator.ipAddress);
+    const after = position.tracks - position.track;
+    if (after > 0) {
+      await callSoap(coordinator.ipAddress, "AVTransport", "RemoveTrackRangeFromQueue", {
+        InstanceID: 0,
+        UpdateID: 0,
+        StartingIndex: position.track + 1,
+        NumberOfTracks: after
+      });
+    }
+    await this.appendQueueItems(coordinator.ipAddress, queueItems);
+    this.onEnqueue?.({ groupId, mode: "end" });
+    return this.nowPlaying(groupId);
+  }
+
+  private async appendQueueItems(ip: string, queueItems: { uri: string; metadata: string }[]): Promise<void> {
+    for (const item of queueItems) {
+      await callSoap(ip, "AVTransport", "AddURIToQueue", {
+        InstanceID: 0,
+        EnqueuedURI: item.uri,
+        EnqueuedURIMetaData: item.metadata,
+        DesiredFirstTrackNumberEnqueued: 0,
+        EnqueueAsNext: 0
+      }, ENQUEUE_TIMEOUT_MS);
+    }
+  }
+
+  /** What Sonos queues for each track: a URI and its DIDL metadata. */
+  private async queueItemsFor(refs: { sourceId: string; trackId: string }[], coordinator: SonosZone): Promise<{ uri: string; metadata: string }[]> {
+    const tracks = await Promise.all(refs.map((ref) => fetchTrack(ref.sourceId, ref.trackId).catch((error: unknown): SourceTrackInfo => {
+      // A Spotify URI plays through Sonos's own Spotify link, so it still plays when the
+      // source can't describe it (signed out, Web API down): Sonos fills in the metadata.
+      if (ref.sourceId === SPOTIFY_SOURCE_ID && isSpotifyUri(ref.trackId)) {
+        return { id: ref.trackId, title: "", url: ref.trackId };
+      }
+      throw error;
+    })));
+    tracks.forEach((track, index) => {
+      if (track.title) this.smapiTrackMeta.set(`${refs[index].sourceId}\n${refs[index].trackId}`, track);
+    });
+    const spotify = tracks.some((track) => isSpotifyUri(track.url)) ? await this.spotifyPlaybackAccount() : undefined;
+    const bridgeHost = this.publicHost();
+    if (!bridgeHost) throw new Error("Could not determine bridge LAN IP for stream proxy");
+    // S1 firmware drops DIDL metadata on plain-http audio/mp4 URIs, so SMAPI
+    // sources (YT Music) must go out as x-sonos-http:…sid= there — which only
+    // resolves once the service is registered via the speaker's customsd page.
+    // S2 firmware (a) honors buildDidl's metadata on plain http — verified on
+    // 86.2: title/artist/album/art all stick — and (b) returns 403 for customsd,
+    // so on S2 we route those sources through the stream proxy like every other
+    // source: full metadata in Now Playing, and no registration required.
+    const coordinatorIsS2 = coordinator.swGen === 2;
+    const queueItems = tracks.map((track, index) => {
+      if (spotify && isSpotifyUri(track.url)) return spotifyQueueItem(track, spotify);
+      const ref = refs[index];
+      const ext = extensionForMime(track.mimeType);
+      const titleSlug = urlSafeSlug(track.title);
+      const proxyUrl = `http://${bridgeHost}:${this.config.port}/api/stream/${encodeURIComponent(ref.sourceId)}/${encodeURIComponent(ref.trackId)}/${titleSlug}${ext}`;
+      // For sources registered as a Sonos SMAPI custom service (sid 240 by
+      // default), use an x-sonos-http URI so Sonos calls our SMAPI endpoint
+      // for the actual URL + metadata. Required for non-mp3 streams
+      // (audio/mp4) where S1 ignores DIDL on plain http URIs.
+      const smapi = SMAPI_SOURCE_INFO[ref.sourceId];
+      if (smapi && !coordinatorIsS2) {
+        // sid here is the raw sid in the URI; serviceTokenMagic (sid*256) is
+        // what goes into the <desc> SA_RINCON binding, not the URI sid.
+        const smapiUri = `x-sonos-http:${encodeURIComponent(ref.trackId)}${ext}?sid=${smapi.sid}&flags=8224&sn=${smapi.sn}`;
+        const metadata = buildSmapiDidl({
+          ...track,
+          id: ref.trackId,
+          url: smapiUri
+        }, smapi);
+        return { uri: smapiUri, metadata };
+      }
+      const proxiedTrack: SourceTrackInfo = { ...track, url: proxyUrl };
+      return { uri: proxyUrl, metadata: buildDidl(proxiedTrack) };
+    });
+    return queueItems;
   }
 
   /**
