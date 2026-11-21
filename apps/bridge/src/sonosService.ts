@@ -104,6 +104,10 @@ export interface SmapiAccountScanResult {
 const SMAPI_MISS_COOLDOWN_MS = 5 * 60 * 1000;
 // Queueing a whole Spotify playlist makes the speaker resolve it before answering.
 const ENQUEUE_TIMEOUT_MS = 20000;
+// An enqueue looks up stream URLs only for the tracks that play next. The rest get
+// theirs when Sonos opens them through the stream proxy: YouTube Music runs yt-dlp per
+// track (seconds each), which would hold a whole playlist up for minutes.
+const RESOLVE_AHEAD = 5;
 // Sonos queues hold at most 1000 tracks, and AddMultipleURIsToQueue takes 16 at a time.
 const QUEUE_MAX = 1000;
 const ADD_MULTIPLE_MAX = 16;
@@ -342,7 +346,8 @@ export class SonosService {
     const missUntil = this.smapiTrackMisses.get(key);
     if (missUntil !== undefined && missUntil > Date.now()) return undefined;
     try {
-      const track = await fetchTrack(parsed.sourceId, parsed.trackId);
+      // Only the metadata: now-playing has no use for a stream URL.
+      const track = await fetchTrack(parsed.sourceId, parsed.trackId, { stream: false });
       this.smapiTrackMeta.set(key, track);
       this.smapiTrackMisses.delete(key);
       return track;
@@ -943,7 +948,9 @@ export class SonosService {
     if (refs.length === 0) throw new Error("trackIds must be non-empty");
     const group = await this.requireGroup(groupId);
     const coordinator = await this.requireZone(group.coordinatorId);
-    const queueItems = await this.queueItemsFor(refs, coordinator);
+    // A replace starts at startTrack; next/append play the new tracks from their first.
+    const firstToPlay = mode === "replace" ? Math.min(Math.max(1, Math.trunc(startTrack)), refs.length) - 1 : 0;
+    const queueItems = await this.queueItemsFor(refs, coordinator, firstToPlay);
 
     let replaced: { items: { sourceId: string; trackId: string }[]; startTrack: number } | undefined;
     let tracksAdded = 0;
@@ -1055,8 +1062,12 @@ export class SonosService {
   }
 
   /** What Sonos queues for each track: a URI and its DIDL metadata. */
-  private async queueItemsFor(refs: { sourceId: string; trackId: string }[], coordinator: SonosZone): Promise<{ uri: string; metadata: string }[]> {
-    const tracks = await Promise.all(refs.map((ref) => fetchTrack(ref.sourceId, ref.trackId).catch((error: unknown): SourceTrackInfo => {
+  private async queueItemsFor(refs: { sourceId: string; trackId: string }[], coordinator: SonosZone, firstToPlay = 0): Promise<{ uri: string; metadata: string }[]> {
+    // Every queued URI goes through the proxy or SMAPI (or is a Spotify URI, which comes
+    // back either way), so most tracks need only their metadata here. The next few get
+    // their stream found now, so they start at once and a dead one fails the enqueue.
+    const resolveNow = (index: number) => index >= firstToPlay && index < firstToPlay + RESOLVE_AHEAD;
+    const tracks = await Promise.all(refs.map((ref, index) => fetchTrack(ref.sourceId, ref.trackId, resolveNow(index) ? {} : { stream: false }).catch((error: unknown): SourceTrackInfo => {
       // A Spotify URI plays through Sonos's own Spotify link, so it still plays when the
       // source can't describe it (signed out, Web API down): Sonos fills in the metadata.
       if (ref.sourceId === SPOTIFY_SOURCE_ID && isSpotifyUri(ref.trackId)) {
