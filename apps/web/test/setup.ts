@@ -44,6 +44,8 @@ if (typeof URL.createObjectURL !== "function") {
   URL.createObjectURL = () => "blob:jsdom";
 }
 if (typeof window !== "undefined") {
+  // jsdom doesn't scroll; switching screens scrolls the page to the top (viewHistory.ts).
+  window.scrollTo = () => undefined;
   Object.defineProperty(HTMLMediaElement.prototype, "play", { configurable: true, value: () => Promise.resolve() });
   Object.defineProperty(HTMLMediaElement.prototype, "pause", { configurable: true, value: () => undefined });
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 // Which screen shows, kept in the browser history so the phone's back gesture, the
 // browser's back button and a reload all do what they should. Playing is the base
@@ -58,6 +58,15 @@ export function useViewHistory() {
     viewRef.current = next;
     setViewState(next);
   }, []);
+
+  // Every screen opens at its top. The screens share one scrolling page, so without
+  // this Music opened as far down as Playing was scrolled, its sources under the header.
+  const shownRef = useRef(view);
+  useLayoutEffect(() => {
+    if (shownRef.current === view) return;
+    shownRef.current = view;
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [view]);
 
   useEffect(() => {
     // A reload keeps the entries and their state: nothing to set up.
