@@ -16,29 +16,41 @@ function todayClientVersion(): string {
   return `1.${yyyymmdd}.01.00`;
 }
 
+// fetch's own message is just "fetch failed"; the reason is in its cause.
+function errorDetail(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = (error as Error & { cause?: unknown }).cause;
+  return cause instanceof Error ? `${error.message} (${cause.name}: ${cause.message})` : error.message;
+}
+
 async function getVisitorId(): Promise<string> {
   if (visitorIdPromise) return visitorIdPromise;
+  // Every failure is forgotten, so the next call tries again: a cached failure would leave
+  // the whole source empty until a restart.
   visitorIdPromise = (async () => {
-    const response = await fetch(YTM_DOMAIN, {
-      headers: {
-        "User-Agent": USER_AGENT,
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.5",
-        // In the EU and Switzerland the page redirects to YouTube's cookie consent page,
-        // which has no ytcfg. This cookie declines the consent, so the page itself comes.
-        "Cookie": CONSENT_COOKIE
-      }
-    });
-    const text = await response.text();
-    const match = text.match(/ytcfg\.set\s*\(\s*(\{.+?\})\s*\)\s*;/);
-    if (!match) throw new Error("Could not extract VISITOR_DATA from music.youtube.com");
     try {
+      // The page's headers are about 17 KB, over Node 22's 16 KB default: the container
+      // starts Node with --max-http-header-size (docker-compose.yml).
+      const response = await fetch(YTM_DOMAIN, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          "Accept": "*/*",
+          "Accept-Language": "en-US,en;q=0.5",
+          // In the EU and Switzerland the page redirects to YouTube's cookie consent page,
+          // which has no ytcfg. This cookie declines the consent, so the page itself comes.
+          "Cookie": CONSENT_COOKIE
+        }
+      });
+      const text = await response.text();
+      const match = text.match(/ytcfg\.set\s*\(\s*(\{.+?\})\s*\)\s*;/);
+      if (!match) throw new Error("Could not extract VISITOR_DATA from music.youtube.com");
       const cfg = JSON.parse(match[1]) as { VISITOR_DATA?: string };
       const visitor = cfg.VISITOR_DATA;
       if (!visitor) throw new Error("ytcfg has no VISITOR_DATA");
       return visitor;
     } catch (error) {
       visitorIdPromise = null;
+      console.warn(`[ytmusic] couldn't read the visitor id: ${errorDetail(error)}`);
       throw error;
     }
   })();

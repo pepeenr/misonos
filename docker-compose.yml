@@ -65,7 +65,9 @@ services:
 
   ytmusic:
     image: misonos-node
-    command: node apps/ytmusic-smapi/dist/index.js
+    # music.youtube.com answers with ~17 KB of headers, over Node 22's 16 KB default,
+    # which made every YouTube Music request fail with HeadersOverflowError.
+    command: node --max-http-header-size=65536 apps/ytmusic-smapi/dist/index.js
     network_mode: host
     restart: unless-stopped
     depends_on: [bridge]
