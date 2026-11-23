@@ -84,6 +84,25 @@ export const GROUP_COLORS_PREF: PrefDef<Record<string, string>> = {
   encode: (value) => JSON.stringify(value)
 };
 
+// The order of a search's sections in Music (Settings → Search results order): a
+// source, or "spotify|<login>" for one Spotify login → section keys, first to last.
+// Shared, so every device sorts a source's results the same way.
+export const SEARCH_SECTION_ORDER_PREF: PrefDef<Record<string, string[]>> = {
+  bridgeKey: "searchSectionOrder",
+  localKey: "misonos:searchSectionOrder",
+  decode: (raw) => {
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+      return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string[]] =>
+        Array.isArray(entry[1]) && entry[1].every((key) => typeof key === "string")));
+    } catch {
+      return null;
+    }
+  },
+  encode: (value) => JSON.stringify(value)
+};
+
 export function readLocalPref<T>(pref: PrefDef<T>): T | null {
   if (typeof window === "undefined") return null;
   try {
