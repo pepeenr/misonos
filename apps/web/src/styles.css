@@ -3172,6 +3172,55 @@ small {
   color: #9aa39f;
 }
 
+/* Settings → Search results order */
+.search-order-hint {
+  margin: 0 0 12px;
+  color: #9aa39f;
+  font-size: 0.88rem;
+}
+
+.search-order-list {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 360px;
+}
+
+.search-order-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid rgba(242, 240, 232, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.search-order-position {
+  width: 1.2em;
+  color: #91d3c4;
+  font-variant-numeric: tabular-nums;
+}
+
+.search-order-title {
+  flex: 1;
+  color: #f2f0e8;
+}
+
+.search-order-reset {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border: 1px solid rgba(242, 240, 232, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f0e8;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
 .pref-volume {
   display: flex;
   align-items: center;

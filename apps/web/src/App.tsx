@@ -26,7 +26,9 @@ import { AppVersion } from "./AppVersion.js";
 import { YouTubeLinkPanel } from "./YouTubeLinkPanel.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
-import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
+import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, SEARCH_SECTION_ORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
+import { orderSearchSections, savedOrder } from "./searchSections.js";
+import { SearchOrderSettings } from "./SearchOrderSettings.js";
 import { forgetPlaylists, pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
 import { SettingsSection } from "./SettingsSection.js";
@@ -982,6 +984,7 @@ export function App() {
             }}
             onShowShortcuts={() => setShortcutsOpen(true)}
           />
+          <SearchOrderSettings customIcons={customIcons} sourcesVersion={sourcesVersion} />
           <SourceLogoSettings customIcons={customIcons} sourcesVersion={sourcesVersion} onChanged={() => void refreshCustomIcons()} />
           <Equalizer zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <Alarms zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
@@ -1566,6 +1569,15 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   }, []);
 
   const [data, setData] = useState<Awaited<ReturnType<typeof bridgeApi.browseSource>> | null>(null);
+  // Settings → Search results order, read again each time Music comes on screen.
+  const [sectionOrders, setSectionOrders] = useState<Record<string, string[]>>(() => readLocalPref(SEARCH_SECTION_ORDER_PREF) ?? {});
+  useEffect(() => {
+    if (!active) return undefined;
+    let cancelled = false;
+    setSectionOrders(readLocalPref(SEARCH_SECTION_ORDER_PREF) ?? {});
+    void loadPref(SEARCH_SECTION_ORDER_PREF).then((value) => { if (!cancelled && value) setSectionOrders(value); });
+    return () => { cancelled = true; };
+  }, [active]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [playing, setPlaying] = useState<string | null>(null);
@@ -1908,6 +1920,11 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   // At the top of a source, its plain folders open in place (BrowseFolder); deeper down,
   // and in search results, a folder opens as its own list with a path back.
   const atRoot = stack.length === 0 && !searchActive;
+  // A search's sections in the order picked in Settings, for this source and Spotify login.
+  const shownItems = useMemo(() => {
+    const items = data?.items ?? [];
+    return searchActive && sourceId ? orderSearchSections(items, savedOrder(sectionOrders, sourceId, browseProfile)) : items;
+  }, [data, searchActive, sourceId, sectionOrders, browseProfile]);
   const isFolder = (item: SourceBrowseItem) => item.kind === "container" && !item.albumArtUri && !(supportsPin && item.id.startsWith("show:"));
 
   // "Play all" for a list of two or more songs.
@@ -2168,7 +2185,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
         </div>
       ) : null}
 
-      {renderBulk(data?.items ?? [])}
+      {renderBulk(shownItems)}
 
       <nav className="browse-crumbs" aria-label="Path" ref={crumbsRef}>
         {stack.length === 0 ? (
@@ -2207,11 +2224,11 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
       ) : loading && !data ? (
         <div className="empty-panel">Loading…</div>
       ) : data ? (
-        data.items.length === 0 ? (
+        shownItems.length === 0 ? (
           <div className="empty-panel">No items.</div>
         ) : (
           <ol className="browse-list">
-            {data.items.map((item, index) => {
+            {shownItems.map((item, index) => {
               if (atRoot && isFolder(item)) {
                 return (
                   <BrowseFolder
