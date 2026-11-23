@@ -1,6 +1,6 @@
 import type { SourceBrowseItem } from "@misonos/sonos-protocol";
 import { describe, expect, it } from "vitest";
-import { orderSearchSections, savedOrder, SEARCH_SECTIONS, sectionKeyOf, sectionsInOrder } from "../src/searchSections.js";
+import { orderFolders, orderSearchSections, savedOrder, SEARCH_SECTIONS, sectionKeyOf, sectionsInOrder } from "../src/musicOrder.js";
 
 const section = (key: string): SourceBrowseItem => ({ id: `section:${key}`, title: key, kind: "section" });
 const item = (id: string): SourceBrowseItem => ({ id, title: id, kind: "playable" });
@@ -58,5 +58,23 @@ describe("search sections", () => {
     expect(savedOrder(orders, "spotify", "9:7")).toEqual(["playlists"]);
     expect(savedOrder(orders, "spotify", "9:5")).toEqual(["albums"]);
     expect(savedOrder(orders, "navidrome")).toBeUndefined();
+  });
+});
+
+describe("top-level folders", () => {
+  const folder = (id: string): SourceBrowseItem => ({ id, title: id, kind: "container" });
+  const spotifyRoot = ["me:playlists", "me:tracks", "me:albums", "me:artists", "me:recent", "me:top"].map(folder);
+
+  it("puts the named folders first, the rest after in the source's order", () => {
+    expect(ids(orderFolders(spotifyRoot, ["me:top", "me:tracks"]))).toEqual(["me:top", "me:tracks", "me:playlists", "me:albums", "me:artists", "me:recent"]);
+  });
+
+  it("leaves the list as it is without an order, or with one it already follows", () => {
+    expect(orderFolders(spotifyRoot, undefined)).toBe(spotifyRoot);
+    expect(orderFolders(spotifyRoot, ["me:playlists"])).toBe(spotifyRoot);
+  });
+
+  it("ignores folders the source no longer has", () => {
+    expect(ids(orderFolders(spotifyRoot, ["gone", "me:recent"]))[0]).toBe("me:recent");
   });
 });

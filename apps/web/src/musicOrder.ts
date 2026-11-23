@@ -1,13 +1,16 @@
 import type { SourceBrowseItem } from "@misonos/sonos-protocol";
 
-// The sections a source's search results come in (a "section" row, then its items),
-// and the order Settings → Search results order puts them in. Only sources whose
-// search returns sections are listed; YouTube Music searches one type at a time.
+// The orders Settings → Order in Music sets, per source and Spotify login: Music's
+// top-level folders, and the sections a search's results come in (a "section" row,
+// then its items). Only sources whose search returns sections have a search order;
+// YouTube Music searches one type at a time.
 
-export interface SearchSection {
+/** Something to order: a search section, or a top-level folder (its id). */
+export interface OrderEntry {
   key: string;
   title: string;
 }
+export type SearchSection = OrderEntry;
 
 const SONGS = { key: "songs", title: "Songs" };
 const ARTISTS = { key: "artists", title: "Artists" };
@@ -37,9 +40,7 @@ export function sectionKeyOf(item: SourceBrowseItem): string {
 
 /** A source's sections in the saved order; ones the order doesn't name keep the source's order, after it. */
 export function sectionsInOrder(sections: SearchSection[], order: string[] | undefined): SearchSection[] {
-  if (!order?.length) return sections;
-  const named = order.flatMap((key) => sections.filter((section) => section.key === key));
-  return [...named, ...sections.filter((section) => !named.includes(section))];
+  return inSavedOrder(sections, order, (section) => section.key);
 }
 
 /** Results with their sections moved into `order`; anything before the first section stays on top. */
@@ -61,4 +62,20 @@ export function orderSearchSections(items: SourceBrowseItem[], order: string[] |
     .map((group, index) => ({ group, index }))
     .sort((a, b) => rank(a.group) - rank(b.group) || a.index - b.index);
   return [...head, ...sorted.flatMap(({ group }) => group)];
+}
+
+/** Entries in the saved order (by key); ones it doesn't name keep their own order, after it. */
+export function inSavedOrder<T>(entries: T[], order: string[] | undefined, keyOf: (entry: T) => string): T[] {
+  if (!order?.length) return entries;
+  const rank = (entry: T) => {
+    const index = order.indexOf(keyOf(entry));
+    return index < 0 ? order.length : index;
+  };
+  const sorted = entries.map((entry, index) => ({ entry, index })).sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index);
+  return sorted.some(({ index }, position) => index !== position) ? sorted.map(({ entry }) => entry) : entries;
+}
+
+/** Music's top-level folders in the saved order (by folder id). */
+export function orderFolders(items: SourceBrowseItem[], order: string[] | undefined): SourceBrowseItem[] {
+  return inSavedOrder(items, order, (item) => item.id);
 }
