@@ -13,6 +13,8 @@ interface SourcePickerProps {
   onChange: (id: string) => void;
   // Map of sourceId → version token for user-uploaded logos (used for cache-busting).
   customIcons?: Record<string, string>;
+  /** Sources that can't be picked right now, with why (their tooltip), by source id. */
+  disabled?: Record<string, string>;
 }
 
 // Each source ships an original, brand-coloured emblem at
@@ -61,7 +63,7 @@ export function ServiceIcon({ sourceId, customVersion }: { sourceId: string; cus
   );
 }
 
-export function SourcePicker({ sources, value, onChange, customIcons = {} }: SourcePickerProps) {
+export function SourcePicker({ sources, value, onChange, customIcons = {}, disabled = {} }: SourcePickerProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const selected = sources.find((source) => source.id === value) ?? sources[0];
@@ -107,6 +109,8 @@ export function SourcePicker({ sources, value, onChange, customIcons = {} }: Sou
                 role="option"
                 aria-selected={source.id === selected?.id}
                 className={source.id === selected?.id ? "selected" : undefined}
+                disabled={!!disabled[source.id]}
+                title={disabled[source.id]}
                 onClick={() => { onChange(source.id); setOpen(false); }}
               >
                 <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
@@ -136,13 +140,15 @@ interface SourceTabsProps {
   customIcons?: Record<string, string>;
   /** Sources offered as several buttons (by source id), e.g. Spotify per login. */
   variants?: Record<string, SourceVariant[]>;
+  /** Sources that can't be picked right now, with why (their tooltip), by source id. */
+  disabled?: Record<string, string>;
 }
 
 /**
  * The sources as a row of logo buttons, styled like the Playing / Music / Library tabs.
  * The chosen one shows its name too; a source with variants gets a named button each.
  */
-export function SourceTabs({ sources, value, onChange, customIcons = {}, variants = {} }: SourceTabsProps) {
+export function SourceTabs({ sources, value, onChange, customIcons = {}, variants = {}, disabled = {} }: SourceTabsProps) {
   if (sources.length === 0) {
     return <div className="source-picker-empty">No sources</div>;
   }
@@ -151,6 +157,7 @@ export function SourceTabs({ sources, value, onChange, customIcons = {}, variant
     <div className="source-tabs" role="group" aria-label="Source">
       {sources.flatMap((source) => {
         const own = variants[source.id];
+        const why = disabled[source.id];
         if (own?.length) {
           return own.map((variant) => {
             const pressed = source.id === selectedId && variant.selected;
@@ -161,7 +168,8 @@ export function SourceTabs({ sources, value, onChange, customIcons = {}, variant
                 className="source-tab named"
                 aria-pressed={pressed}
                 aria-label={variant.title}
-                title={variant.title}
+                title={why ?? variant.title}
+                disabled={!!why}
                 onClick={() => {
                   if (source.id !== selectedId) onChange(source.id);
                   variant.onSelect();
@@ -181,7 +189,8 @@ export function SourceTabs({ sources, value, onChange, customIcons = {}, variant
             className={pressed ? "source-tab named" : "source-tab"}
             aria-pressed={pressed}
             aria-label={source.name}
-            title={source.name}
+            title={why ?? source.name}
+            disabled={!!why}
             onClick={() => { if (!pressed) onChange(source.id); }}
           >
             <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
