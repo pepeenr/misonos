@@ -38,6 +38,37 @@ describe("SourceTabs", () => {
     expect(onChange).toHaveBeenCalledWith("spotify");
   });
 
+  it("greys out a source that can't be picked, every login of it, and says why", () => {
+    const onChange = vi.fn();
+    const pickMia = vi.fn();
+    render(
+      <SourceTabs
+        sources={[...sources, { id: "youtube-music", name: "YouTube Music" }]}
+        value="navidrome"
+        onChange={onChange}
+        variants={{
+          spotify: [
+            { key: "9:3", label: "Pepe", title: "Spotify Pepe", selected: true, onSelect: vi.fn() },
+            { key: "9:5", label: "Mia", title: "Spotify Mia", selected: false, onSelect: pickMia }
+          ]
+        }}
+        disabled={{ spotify: "Spotify plays only on Sonos speakers: pick a room" }}
+      />
+    );
+    for (const name of ["Spotify Pepe", "Spotify Mia"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "Spotify plays only on Sonos speakers: pick a room");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Spotify Mia" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(pickMia).not.toHaveBeenCalled();
+
+    expect(screen.getByRole("button", { name: "YouTube Music" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "YouTube Music" }));
+    expect(onChange).toHaveBeenCalledWith("youtube-music");
+  });
+
   it("gives each Spotify login a button, which switches to Spotify and picks the login", () => {
     const onChange = vi.fn();
     const pickMia = vi.fn();

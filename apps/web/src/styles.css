@@ -1189,8 +1189,18 @@ h2 {
   text-align: left;
 }
 
-.source-picker-option > button:hover {
+.source-picker-option > button:not(:disabled):hover {
   background: rgba(255, 255, 255, 0.06);
+}
+
+.source-picker-option > button:disabled {
+  color: #6f756f;
+  cursor: not-allowed;
+}
+
+.source-picker-option > button:disabled .service-icon {
+  opacity: 0.3;
+  filter: grayscale(1);
 }
 
 .source-picker-option > button.selected {
@@ -4350,14 +4360,25 @@ small {
   filter: saturate(0.5);
 }
 
-.source-tab:hover {
+.source-tab:not(:disabled):hover {
   color: #f2f0e8;
   background: rgba(255, 255, 255, 0.05);
 }
 
-.source-tab:hover .service-icon {
+.source-tab:not(:disabled):hover .service-icon {
   opacity: 1;
   filter: none;
+}
+
+/* A source the target can't play (Spotify on "This device"): greyed out. */
+.source-tab:disabled {
+  color: #6f756f;
+  cursor: not-allowed;
+}
+
+.source-tab:disabled .service-icon {
+  opacity: 0.3;
+  filter: grayscale(1);
 }
 
 .source-tab[aria-pressed="true"] {

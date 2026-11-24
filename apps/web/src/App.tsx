@@ -28,6 +28,7 @@ import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, FOLDER_ORDER_PREF, SEARCH_SECTION_ORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
 import { orderFolders, orderSearchSections, savedOrder } from "./musicOrder.js";
+import { shownSourceId, speakerOnlySources } from "./deviceSources.js";
 import { MusicOrderSettings } from "./MusicOrderSettings.js";
 import { forgetPlaylists, pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
 import { CollapsibleHeading } from "./CollapsibleHeading.js";
@@ -1435,7 +1436,15 @@ function BrowseThumb({ src }: { src?: string }) {
 
 function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
   const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>> | null>(null);
-  const [sourceId, setSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
+  const [chosenSourceId, setChosenSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
+  // "This device" can't play a source that plays only through the speakers (Spotify):
+  // it's greyed out, and Music shows the first source that can play here instead,
+  // going back to the chosen one when a room is picked again.
+  const deviceBlocked = useMemo(
+    () => selectedGroupId === LOCAL_DEVICE_ID ? speakerOnlySources(sources ?? []) : {},
+    [selectedGroupId, sources]
+  );
+  const sourceId = shownSourceId(sources ?? [], chosenSourceId, deviceBlocked);
   const sourceInitializedRef = useRef(false);
   const favorites = useFavorites();
   const localPlayer = useLocalPlayer();
@@ -1460,7 +1469,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   const [addTo, setAddTo] = useState<SourceBrowseItem | null>(null);
 
   const persistSourceId = useCallback((id: string) => {
-    setSourceId(id);
+    setChosenSourceId(id);
     setPref(LAST_SOURCE_PREF, id);
   }, []);
   // Each Sonos Spotify login (Mia, Pepe) is a Spotify button of its own: it picks which
@@ -1722,13 +1731,25 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
           persistSourceId(chosen);
           return;
         }
-        const stillExists = sourceId ? next.some((entry) => entry.id === sourceId) : false;
+        const stillExists = chosenSourceId ? next.some((entry) => entry.id === chosenSourceId) : false;
         if (!stillExists) persistSourceId(next[0].id);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load sources");
       }
     })();
-  }, [sourceId, persistSourceId, sourcesVersion]);
+  }, [chosenSourceId, persistSourceId, sourcesVersion]);
+
+  // Another source on screen (picked, or swapped in for "This device"): start it from the top.
+  // The search text stays: it's likely meant for the new source.
+  const shownSourceRef = useRef(sourceId);
+  useEffect(() => {
+    const before = shownSourceRef.current;
+    shownSourceRef.current = sourceId;
+    if (!before || !sourceId || before === sourceId) return;
+    setStack((current) => current.length > 0 ? [] : current);
+    setSearchActive(false);
+    setData(null);
+  }, [sourceId]);
 
   // Another login is another library: start it from the top.
   const shownProfileRef = useRef(browseProfile);
@@ -2085,6 +2106,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
             onChange={(id) => { persistSourceId(id); setStack([]); clearSearch(); }}
             customIcons={customIcons}
             variants={spotifyVariants.length > 0 ? { spotify: spotifyVariants } : undefined}
+            disabled={deviceBlocked}
           />
         </div>
       </div>
@@ -2111,6 +2133,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
             value={sourceId}
             onChange={(id) => { persistSourceId(id); setStack([]); setSearchActive(false); setData(null); }}
             customIcons={customIcons}
+            disabled={deviceBlocked}
           />
           <span className="main-search-field">
             <Search size={18} aria-hidden="true" />
