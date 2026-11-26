@@ -19,6 +19,7 @@ import { ServiceIcon, SourcePicker, SourceTabs, type SourceVariant } from "./Sou
 import { useSpotifyProfiles } from "./spotifyProfiles.js";
 import { SpotifySettings } from "./SpotifySettings.js";
 import { YouTubeSettings } from "./YouTubeSettings.js";
+import { disabledSourceIds, sourceSectionShown, useSourceSettings, type SourceSettings } from "./sourceSettings.js";
 import { describeImport, isYouTubeLink } from "./youtube.js";
 import { useYouTubeLink } from "./useYouTubeLink.js";
 import { useAppUpdate } from "./appUpdate.js";
@@ -136,6 +137,9 @@ export function App() {
   // Bumped when a source is switched on/off in Settings so the (always-mounted)
   // browser and the logo list re-fetch /api/sources.
   const [sourcesVersion, setSourcesVersion] = useState(0);
+  const sourcesChanged = useCallback(() => setSourcesVersion((version) => version + 1), []);
+  // Settings → Music sources: the switches, and which source's own section shows.
+  const sources = useSourceSettings(view === "settings", sourcesVersion, sourcesChanged);
   const groupEditQueueRef = useRef<PendingGroupEdit[]>([]);
   const groupEditProcessingRef = useRef(false);
   // Best-known "last selected group" membership key — seeded synchronously from the
@@ -990,13 +994,28 @@ export function App() {
           <Equalizer zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <Alarms zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
           <AboutSystem />
-          <SpotifySettings onSourcesChanged={() => setSourcesVersion((version) => version + 1)} />
-          <YouTubeSettings sourcesVersion={sourcesVersion} onChanged={() => setSourcesVersion((version) => version + 1)} />
-          <CustomMusicServices
-            zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)}
+          {/* The switches come first, so a section they hide never moves the switch. */}
+          <MusicSources
+            settings={sources.settings}
+            toggleError={sources.toggleError}
             customIcons={customIcons}
-            onSourcesChanged={() => setSourcesVersion((version) => version + 1)}
+            onToggle={(sourceId, enabled) => void sources.toggle(sourceId, enabled)}
+            onLoginChanged={sourcesChanged}
           />
+          {sourceSectionShown(sources.settings, "spotify") ? <SpotifySettings onSourcesChanged={sourcesChanged} /> : null}
+          {sourceSectionShown(sources.settings, "youtube-music") ? (
+            <YouTubeSettings
+              youtubeMusic={sources.settings?.find((source) => source.id === "youtube-music") ?? null}
+              sourcesVersion={sourcesVersion}
+              onChanged={sourcesChanged}
+            />
+          ) : null}
+          {sources.settings !== undefined ? (
+            <CustomMusicServices
+              zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)}
+              disabledSourceIds={disabledSourceIds(sources.settings)}
+            />
+          ) : null}
           {showDevPanels ? (
             <>
               <MusicServicesDebug />
@@ -1620,7 +1639,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   useEffect(() => {
     void bridgeApi.youtubeStatus().then(setYoutube).catch(() => setYoutube(null));
   }, [sourcesVersion]);
-  // Only while YouTube Music is on as a source (Settings → Custom Music Services): with it
+  // Only while YouTube Music is on as a source (Settings → Music sources): with it
   // off, a pasted link is just searched for like anything else.
   const youtubeLinks = Boolean(youtube?.available) && !!sources?.some((entry) => entry.id === "youtube-music");
   const queryIsYouTube = youtubeLinks && isYouTubeLink(searchQuery);
@@ -2089,7 +2108,7 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   if (sources && sources.length === 0) {
     return (
       <section className="queue-panel">
-        <div className="empty-panel">No browse sources are running. Start a source service (e.g. <code>npm run dev:grateful</code>), or turn one back on under Settings → Custom Music Services.</div>
+        <div className="empty-panel">No browse sources are running. Start a source service (e.g. <code>npm run dev:grateful</code>), or turn one back on under Settings → Music sources.</div>
       </section>
     );
   }
@@ -2330,17 +2349,62 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   );
 }
 
-interface CustomMusicServicesProps {
-  zones: SonosZone[];
+interface MusicSourcesProps {
+  settings: SourceSettings;
+  toggleError: string;
   customIcons: Record<string, string>;
-  onSourcesChanged: () => void;
+  onToggle: (sourceId: string, enabled: boolean) => void;
+  /** Navidrome's login changed: it may have appeared or vanished. */
+  onLoginChanged: () => void;
 }
 
-function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMusicServicesProps) {
+// The on/off switch of every source the bridge knows. A switched-off source is gone
+// from Music and its own Settings (Spotify, YouTube, Navidrome's login, registration).
+function MusicSources({ settings, toggleError, customIcons, onToggle, onLoginChanged }: MusicSourcesProps) {
+  if (!settings?.length) return null;
+  return (
+    <SettingsSection id="music-sources" title="Music sources">
+      <p className="pref-hint">
+        Switch a source off to hide it from Music on every device, along with its settings here. Favorites, playlists
+        and queued tracks from it still play.
+      </p>
+      {toggleError ? <div className="service-result error">{toggleError}</div> : null}
+      <div className="source-toggles">
+        {settings.map((source) => (
+          <Fragment key={source.id}>
+            <label className={source.enabled ? "pref-row source-toggle" : "pref-row source-toggle off"}>
+              <span className="source-toggle-name">
+                <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
+                <span className="pref-label">
+                  <strong>{source.name}</strong>
+                  {source.available ? null : <small>Not running or not configured</small>}
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={`Show ${source.name}`}
+                checked={source.enabled}
+                onChange={(event) => onToggle(source.id, event.target.checked)}
+              />
+            </label>
+            {source.id === "navidrome" && source.enabled ? <NavidromeLogin onChanged={onLoginChanged} /> : null}
+          </Fragment>
+        ))}
+      </div>
+    </SettingsSection>
+  );
+}
+
+interface CustomMusicServicesProps {
+  zones: SonosZone[];
+  /** Switched-off sources, which have nothing to register. */
+  disabledSourceIds: ReadonlySet<string>;
+}
+
+function CustomMusicServices({ zones, disabledSourceIds }: CustomMusicServicesProps) {
   const [presets, setPresets] = useState<Awaited<ReturnType<typeof bridgeApi.customServicePresets>> | null>(null);
   const [discovered, setDiscovered] = useState<Awaited<ReturnType<typeof bridgeApi.musicServices>> | null>(null);
-  const [sourceSettings, setSourceSettings] = useState<Awaited<ReturnType<typeof bridgeApi.sourceSettings>>>([]);
-  const [toggleError, setToggleError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [zoneByPreset, setZoneByPreset] = useState<Record<string, string>>({});
@@ -2352,14 +2416,12 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
     setLoading(true);
     setError("");
     try {
-      const [nextPresets, nextDiscovered, nextSourceSettings] = await Promise.all([
+      const [nextPresets, nextDiscovered] = await Promise.all([
         bridgeApi.customServicePresets(),
-        bridgeApi.musicServices().catch(() => null),
-        bridgeApi.sourceSettings()
+        bridgeApi.musicServices().catch(() => null)
       ]);
       setPresets(nextPresets);
       setDiscovered(nextDiscovered);
-      setSourceSettings(nextSourceSettings);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -2368,34 +2430,6 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-
-  // Flip the switch right away, then settle on the bridge's answer (or roll back).
-  const toggleSource = useCallback(async (sourceId: string, enabled: boolean) => {
-    setToggleError("");
-    setSourceSettings((current) => current.map((source) => (source.id === sourceId ? { ...source, enabled } : source)));
-    try {
-      setSourceSettings(await bridgeApi.setSourceEnabled(sourceId, enabled));
-      onSourcesChanged();
-    } catch (err) {
-      setSourceSettings((current) => current.map((source) => (source.id === sourceId ? { ...source, enabled: !enabled } : source)));
-      setToggleError(err instanceof Error ? err.message : "Failed");
-    }
-  }, [onSourcesChanged]);
-
-  // After a login change: Navidrome may have appeared or vanished.
-  const refreshSources = useCallback(async () => {
-    try {
-      setSourceSettings(await bridgeApi.sourceSettings());
-    } catch {
-      /* keep the current list */
-    }
-    onSourcesChanged();
-  }, [onSourcesChanged]);
-
-  const disabledSourceIds = useMemo(
-    () => new Set(sourceSettings.filter((source) => !source.enabled).map((source) => source.id)),
-    [sourceSettings]
-  );
 
   const registeredNames = useMemo(() => new Set(discovered?.services.map((service) => service.name.toLowerCase()) ?? []), [discovered]);
   // True only when the WHOLE household is confirmed S2 (a Sonos household is
@@ -2518,6 +2552,8 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
   const enabledPresets = presets?.filter((preset) => !disabledSourceIds.has(preset.id)) ?? [];
   const requiredPresets = enabledPresets.filter((preset) => preset.registrationRequired);
   const optionalPresets = enabledPresets.filter((preset) => !preset.registrationRequired);
+  // Every service here is switched off: nothing to show.
+  if (presets && !error && enabledPresets.length === 0) return null;
 
   return (
     <SettingsSection
@@ -2536,38 +2572,6 @@ function CustomMusicServices({ zones, customIcons, onSourcesChanged }: CustomMus
         <div className="empty-panel error-panel"><span>{error}</span></div>
       ) : presets ? (
         <div className="custom-services-groups">
-          {sourceSettings.length > 0 ? (
-            <div className="custom-services-group">
-              <div className="custom-services-group-heading">
-                <h3>Sources</h3>
-                <p>Switch a source off to hide it from Music on every device. Favorites, playlists and queued tracks from it still play.</p>
-              </div>
-              {toggleError ? <div className="service-result error">{toggleError}</div> : null}
-              <div className="source-toggles">
-                {sourceSettings.map((source) => (
-                  <Fragment key={source.id}>
-                    <label className={source.enabled ? "pref-row source-toggle" : "pref-row source-toggle off"}>
-                      <span className="source-toggle-name">
-                        <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
-                        <span className="pref-label">
-                          <strong>{source.name}</strong>
-                          {source.available ? null : <small>Not running or not configured</small>}
-                        </span>
-                      </span>
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        aria-label={`Show ${source.name}`}
-                        checked={source.enabled}
-                        onChange={(event) => void toggleSource(source.id, event.target.checked)}
-                      />
-                    </label>
-                    {source.id === "navidrome" && source.enabled ? <NavidromeLogin onChanged={() => void refreshSources()} /> : null}
-                  </Fragment>
-                ))}
-              </div>
-            </div>
-          ) : null}
           {requiredPresets.length > 0 ? (
             <div className="custom-services-group">
               <div className="custom-services-group-heading">

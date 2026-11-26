@@ -479,6 +479,69 @@ describe("App", () => {
     await waitFor(() => expect(screen.queryByRole("slider", { name: "Sub level" })).toBeNull());
     expect(screen.getByRole("slider", { name: "Bass" })).toBeInTheDocument();
   });
+
+  it("hides a source's own Settings while it's switched off", async () => {
+    const zones = [{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true, swGen: 2 }];
+    const group = { id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones };
+    const disabled = new Set<string>();
+    const sourceSettings = () => [
+      { id: "spotify", name: "Spotify", enabled: !disabled.has("spotify"), available: true },
+      { id: "youtube-music", name: "YouTube Music", enabled: !disabled.has("youtube-music"), available: true },
+      { id: "grateful-dead-archive", name: "Grateful Dead Archive", enabled: !disabled.has("grateful-dead-archive"), available: true }
+    ];
+    const preset = (id: string, name: string) => ({
+      id, name, description: "", uri: "http://10.0.0.9:4321/", port: 4321, path: "/", authType: "Anonymous", pollInterval: 60, registrationRequired: false
+    });
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/groups")) return json([group]);
+      if (url.endsWith("/api/zones")) return json(zones);
+      if (url.endsWith("/api/discover")) return json({ groups: [group], zones });
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "STOPPED", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      if (url.endsWith("/api/sources")) return json([]);
+      if (url.endsWith("/api/sources/settings")) return json(sourceSettings());
+      const toggle = url.match(/\/api\/sources\/([^/]+)\/enabled$/);
+      if (toggle && init?.method === "POST") {
+        if ((JSON.parse(String(init.body)) as { enabled: boolean }).enabled) disabled.delete(toggle[1]);
+        else disabled.add(toggle[1]);
+        return json(sourceSettings());
+      }
+      if (url.endsWith("/api/sources/spotify/auth/status")) return json({ configured: false, signedIn: false });
+      if (url.endsWith("/api/sources/spotify/config")) return json({ source: "none", envConfigured: false });
+      if (url.endsWith("/api/youtube/status")) return json({ available: true, paired: false, playlist: "YouTube", mixSongs: 10 });
+      if (url.endsWith("/api/sources/youtube-music/auth/status")) return json({ cookieAuth: "signed-out" });
+      if (url.endsWith("/api/music/custom-presets")) {
+        return json([preset("youtube-music", "YouTube Music"), preset("grateful-dead-archive", "Grateful Dead Archive")]);
+      }
+      // The rest of Settings isn't under test: let it fail quietly.
+      return new Response("{}", { status: 404 });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    fireEvent.click(await screen.findByLabelText("Settings"));
+    expect(await screen.findByRole("region", { name: "Spotify" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "YouTube" })).toBeInTheDocument();
+    const services = await screen.findByRole("region", { name: "Custom music services" });
+    expect(within(services).getByRole("heading", { name: "YouTube Music" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Show Spotify" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Spotify" })).toBeNull());
+    expect(screen.getByRole("region", { name: "YouTube" })).toBeInTheDocument();
+
+    // YouTube Music off: no YouTube section (its library or links), and nothing of it to register.
+    fireEvent.click(screen.getByRole("switch", { name: "Show YouTube Music" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "YouTube" })).toBeNull());
+    expect(within(screen.getByRole("region", { name: "Custom music services" })).queryByRole("heading", { name: "YouTube Music" })).toBeNull();
+
+    // With every registrable service off, that section goes too.
+    fireEvent.click(screen.getByRole("switch", { name: "Show Grateful Dead Archive" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Custom music services" })).toBeNull());
+
+    // Switched back on, its section comes back.
+    fireEvent.click(screen.getByRole("switch", { name: "Show Spotify" }));
+    expect(await screen.findByRole("region", { name: "Spotify" })).toBeInTheDocument();
+    expect(disabled).toEqual(new Set(["youtube-music", "grateful-dead-archive"]));
+  });
 });
 
 function json(value: unknown): Response {
