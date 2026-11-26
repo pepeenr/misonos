@@ -57,6 +57,22 @@ describe("SubsonicClient", () => {
     expect(albums).toHaveLength(503);
     expect(seen.map((url) => url.searchParams.get("offset"))).toEqual(["0", "500"]);
   });
+
+  it("pages a genre past 500 albums too", async () => {
+    const seen: URL[] = [];
+    const page = (count: number) => ({ albumList2: { album: Array.from({ length: count }, (_, i) => ({ id: `d${i}`, name: `D${i}` })) } });
+    let call = 0;
+    const fetchImpl = (async (input: URL | RequestInfo) => {
+      seen.push(new URL(String(input)));
+      return new Response(JSON.stringify({ "subsonic-response": { status: "ok", ...page(call++ === 0 ? 500 : 3) } }));
+    }) as typeof fetch;
+    const albums = await new SubsonicClient(SERVER, fetchImpl).albumsByGenre("Dance");
+    expect(albums).toHaveLength(503);
+    expect(seen.map((url) => [url.searchParams.get("type"), url.searchParams.get("genre"), url.searchParams.get("offset")])).toEqual([
+      ["byGenre", "Dance", "0"],
+      ["byGenre", "Dance", "500"]
+    ]);
+  });
 });
 
 describe("NavidromeBrowser", () => {

@@ -5,7 +5,7 @@ import { NavidromeBrowser } from "./browse.js";
 import { serverFromConfig, type NavidromeConfig } from "./config.js";
 import { encodeId } from "./ids.js";
 import { mp3Bitrate } from "./mp3.js";
-import { exactly, planStream, type SizedResponse, type StreamPlan } from "./stream.js";
+import { exactly, planStream, sameTranscode, skipBytes, type SizedResponse, type StreamPlan } from "./stream.js";
 import { SubsonicClient, type SubsonicSong } from "./subsonic.js";
 
 const SONG_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -43,33 +43,35 @@ export function createServer(config: NavidromeConfig): http.Server {
     song: SubsonicSong,
     plan: StreamPlan & { sized: SizedResponse }
   ): Promise<void> => {
+    if (plan.sized.status === 416) return unsatisfiable(response, plan.sized.total);
     let sized = plan.sized;
-    if (sized.status === 416) {
-      response.writeHead(416, { "content-range": `bytes */${sized.total}` });
-      response.end();
-      return;
-    }
     if (request.method === "HEAD") {
       response.writeHead(sized.status, sizedHeaders(sized));
       response.end();
       return;
     }
-    const upstream = await fetchUpstream(request, response, client.url("stream", plan.params), {});
-    if (!upstream?.body) return;
-    const reader = upstream.body.getReader();
-    const { buffered, kbps } = await probeBitrate(reader);
-    if (buffered.length === 0) return sendJson(response, 502, { error: "Navidrome: the transcode came back empty" });
-    if (kbps) {
+    let transcode = await startTranscode(request, response, client, plan.params);
+    if (!transcode) return;
+    if (transcode.kbps) {
       if (bitrates.size >= SONG_CACHE_MAX) bitrates.clear();
-      bitrates.set(song.id, kbps);
-      // Re-size with the real bitrate when that doesn't change what was asked of the server.
-      const replanned = planStream(song, { ...config, kbps }, request.headers.range);
-      if (replanned.sized?.status === sized.status && replanned.params.timeOffset === plan.params.timeOffset) {
+      bitrates.set(song.id, transcode.kbps);
+      // Re-size with the real bitrate. Where that moves the time offset, the transcode
+      // started at the wrong place: start it again there before sending anything.
+      const replanned = planStream(song, { ...config, kbps: transcode.kbps }, request.headers.range);
+      if (replanned.sized) {
+        const moved = !sameTranscode(replanned.params, plan.params);
+        if (moved || replanned.sized.status === 416) await transcode.reader.cancel().catch(() => undefined);
+        if (replanned.sized.status === 416) return unsatisfiable(response, replanned.sized.total);
+        if (moved) {
+          transcode = await startTranscode(request, response, client, replanned.params);
+          if (!transcode) return;
+        }
         sized = replanned.sized;
       }
     }
     response.writeHead(sized.status, sizedHeaders(sized));
-    const body = Readable.from(exactly(upstreamChunks(reader, buffered), sized.end - sized.start + 1), { objectMode: false });
+    const chunks = skipBytes(upstreamChunks(transcode.reader, transcode.buffered), sized.skip);
+    const body = Readable.from(exactly(chunks, sized.end - sized.start + 1), { objectMode: false });
     await pipeline(body, response).catch(() => undefined);
   };
 
@@ -200,6 +202,30 @@ async function fetchUpstream(
     return undefined;
   }
   return upstream;
+}
+
+// Start a transcode and read up to its first MP3 frame, which shows the bitrate.
+// Undefined once an error has been answered.
+async function startTranscode(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  client: SubsonicClient,
+  params: StreamPlan["params"]
+): Promise<{ reader: ReadableStreamDefaultReader<Uint8Array>; buffered: Uint8Array[]; kbps?: number } | undefined> {
+  const upstream = await fetchUpstream(request, response, client.url("stream", params), {});
+  if (!upstream?.body) return undefined;
+  const reader = upstream.body.getReader();
+  const { buffered, kbps } = await probeBitrate(reader);
+  if (buffered.length === 0) {
+    sendJson(response, 502, { error: "Navidrome: the transcode came back empty" });
+    return undefined;
+  }
+  return { reader, buffered, kbps };
+}
+
+function unsatisfiable(response: http.ServerResponse, total: number): void {
+  response.writeHead(416, { "content-range": `bytes */${total}` });
+  response.end();
 }
 
 // Read the start of a transcode until its first MP3 frame shows the bitrate.
