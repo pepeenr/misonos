@@ -6,9 +6,10 @@ import type { SubsonicSong } from "./subsonic.js";
 const TAG_ALLOWANCE = 16 * 1024;
 const PAD_CHUNK = 64 * 1024;
 
-// The byte layout this service gives a sized transcode response.
+// The byte layout this service gives a sized transcode response. `skip` is how many
+// bytes of the transcode come before `start`: the transcode begins at a whole second.
 export type SizedResponse =
-  | { status: 200 | 206; start: number; end: number; total: number; kbps: number }
+  | { status: 200 | 206; start: number; end: number; total: number; kbps: number; skip: number }
   | { status: 416; total: number; kbps: number };
 
 export interface StreamPlan {
@@ -23,7 +24,8 @@ export interface StreamPlan {
 // Sonos wants a length and seeks with Range requests, but a transcode has neither
 // until it's finished. For constant-bitrate MP3, bytes map linearly to time, so the
 // response claims an estimated total (padded to fit, see `exactly`) and a Range
-// start becomes a `timeOffset` on the transcode.
+// start becomes a `timeOffset` on the transcode, whole seconds, plus the bytes to
+// skip from there to reach the start.
 export function planStream(
   song: Pick<SubsonicSong, "id" | "suffix" | "duration" | "bitRate">,
   options: { transcodeFormat: string; maxBitRate: number; kbps?: number },
@@ -41,15 +43,41 @@ export function planStream(
   // Subsonic durations are whole seconds (Navidrome rounds down): allow one more.
   const total = (Math.floor(song.duration) + 1) * bytesPerSecond + TAG_ALLOWANCE;
   const range = parseRange(rangeHeader);
-  if (!range) return { params, forwardRange: false, sized: { status: 200, start: 0, end: total - 1, total, kbps } };
+  if (!range) return { params, forwardRange: false, sized: { status: 200, start: 0, end: total - 1, total, kbps, skip: 0 } };
   if (range.start >= total) return { params, forwardRange: false, sized: { status: 416, total, kbps } };
 
   const timeOffset = Math.floor(range.start / bytesPerSecond);
   return {
     params: timeOffset > 0 ? { ...params, timeOffset } : params,
     forwardRange: false,
-    sized: { status: 206, start: range.start, end: Math.min(range.end ?? total - 1, total - 1), total, kbps }
+    sized: {
+      status: 206,
+      start: range.start,
+      end: Math.min(range.end ?? total - 1, total - 1),
+      total,
+      kbps,
+      skip: range.start - timeOffset * bytesPerSecond
+    }
   };
+}
+
+// The same transcode request (format, bitrate, offset) both times.
+export function sameTranscode(a: StreamPlan["params"], b: StreamPlan["params"]): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].every((key) => a[key] === b[key]);
+}
+
+// `chunks` without its first `count` bytes.
+export async function* skipBytes(chunks: AsyncIterable<Uint8Array>, count: number): AsyncGenerator<Uint8Array> {
+  let remaining = count;
+  for await (const chunk of chunks) {
+    if (remaining >= chunk.length) {
+      remaining -= chunk.length;
+      continue;
+    }
+    yield remaining > 0 ? chunk.subarray(remaining) : chunk;
+    remaining = 0;
+  }
 }
 
 // Navidrome transcodes a lossy file at min(its bitrate, maxBitRate), and LAME rounds

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { needsTranscode, streamMime } from "../src/formats.js";
-import { exactly, parseRange, planStream, transcodeBitrate } from "../src/stream.js";
+import { exactly, parseRange, planStream, sameTranscode, skipBytes, transcodeBitrate } from "../src/stream.js";
 
 const MP3_320 = { transcodeFormat: "mp3", maxBitRate: 320 };
 // 200 s at 320 kbps (40000 bytes/s), plus one second of slack and the 16 KiB tag allowance.
@@ -32,20 +32,29 @@ describe("planStream", () => {
     const plan = planStream({ id: "s2", suffix: "opus", duration: 200, bitRate: 330 }, MP3_320);
     expect(plan.params).toEqual({ id: "s2", format: "mp3", maxBitRate: 320 });
     expect(plan.forwardRange).toBe(false);
-    expect(plan.sized).toEqual({ status: 200, start: 0, end: TOTAL_320 - 1, total: TOTAL_320, kbps: 320 });
+    expect(plan.sized).toEqual({ status: 200, start: 0, end: TOTAL_320 - 1, total: TOTAL_320, kbps: 320, skip: 0 });
   });
 
   it("maps a byte Range on a CBR transcode to a time offset", () => {
     // 320 kbps = 40000 bytes/s, so byte 4_000_000 is 100 s in.
     const plan = planStream({ id: "s3", suffix: "opus", duration: 200 }, MP3_320, "bytes=4000000-");
     expect(plan.params.timeOffset).toBe(100);
-    expect(plan.sized).toEqual({ status: 206, start: 4_000_000, end: TOTAL_320 - 1, total: TOTAL_320, kbps: 320 });
+    expect(plan.sized).toEqual({ status: 206, start: 4_000_000, end: TOTAL_320 - 1, total: TOTAL_320, kbps: 320, skip: 0 });
   });
 
   it("keeps a closed range's end and doesn't offset a range inside the first second", () => {
     const plan = planStream({ id: "s3", suffix: "opus", duration: 200 }, MP3_320, "bytes=0-1");
     expect(plan.params.timeOffset).toBeUndefined();
-    expect(plan.sized).toMatchObject({ status: 206, start: 0, end: 1 });
+    expect(plan.sized).toMatchObject({ status: 206, start: 0, end: 1, skip: 0 });
+  });
+
+  it("skips from the whole second to a range's first byte", () => {
+    const inFirstSecond = planStream({ id: "s3", suffix: "opus", duration: 200 }, MP3_320, "bytes=30-33");
+    expect(inFirstSecond.params.timeOffset).toBeUndefined();
+    expect(inFirstSecond.sized).toMatchObject({ status: 206, start: 30, end: 33, skip: 30 });
+    const later = planStream({ id: "s3", suffix: "opus", duration: 200 }, MP3_320, "bytes=4000030-");
+    expect(later.params.timeOffset).toBe(100);
+    expect(later.sized).toMatchObject({ start: 4_000_030, skip: 30 });
   });
 
   it("uses the bitrate the server will really transcode at", () => {
@@ -120,5 +129,32 @@ describe("exactly", () => {
 
   it("passes an exact-length stream through", async () => {
     expect(await collect([[1, 2], [3]], 3)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("skipBytes", () => {
+  async function collect(chunks: number[][], count: number): Promise<number[]> {
+    async function* source() {
+      for (const chunk of chunks) yield Uint8Array.from(chunk);
+    }
+    const out: number[] = [];
+    for await (const chunk of skipBytes(source(), count)) out.push(...chunk);
+    return out;
+  }
+
+  it("drops whole and part chunks up to the count", async () => {
+    expect(await collect([[1, 2], [3, 4, 5], [6]], 3)).toEqual([4, 5, 6]);
+    expect(await collect([[1, 2], [3]], 2)).toEqual([3]);
+    expect(await collect([[1, 2], [3]], 0)).toEqual([1, 2, 3]);
+    expect(await collect([[1, 2]], 5)).toEqual([]);
+  });
+});
+
+describe("sameTranscode", () => {
+  it("compares every param, including a missing time offset", () => {
+    const base = { id: "s", format: "mp3", maxBitRate: 320 };
+    expect(sameTranscode(base, { ...base })).toBe(true);
+    expect(sameTranscode(base, { ...base, timeOffset: 40 })).toBe(false);
+    expect(sameTranscode({ ...base, timeOffset: 100 }, { ...base, timeOffset: 40 })).toBe(false);
   });
 });

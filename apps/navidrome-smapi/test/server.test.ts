@@ -121,6 +121,28 @@ describe("/stream", () => {
     expect(streamCalls()[1].searchParams.get("timeOffset")).toBe("100");
   });
 
+  it("starts a range that falls inside a second at its own byte", async () => {
+    // The fake transcode has its first frame header at bytes 30–33, whatever the offset.
+    const frame = [0xff, 0xfb, 0xe4, 0x00];
+    const early = await realFetch(`${base}/stream?id=op`, { headers: { range: "bytes=30-33" } });
+    expect(early.headers.get("content-range")).toBe(`bytes 30-33/${201 * 40_000 + TAG_ALLOWANCE}`);
+    expect([...new Uint8Array(await early.arrayBuffer())]).toEqual(frame);
+    expect(streamCalls()[0].searchParams.get("timeOffset")).toBeNull();
+
+    const later = await realFetch(`${base}/stream?id=op`, { headers: { range: "bytes=4000030-4000033" } });
+    expect([...new Uint8Array(await later.arrayBuffer())]).toEqual(frame);
+    expect(streamCalls()[1].searchParams.get("timeOffset")).toBe("100");
+  });
+
+  it("starts the transcode again when its bitrate moves a first seek", async () => {
+    // Predicted 128 kbps puts byte 1,600,000 at 100 s; at the real 320 kbps it's 40 s.
+    const response = await realFetch(`${base}/stream?id=lo`, { headers: { range: "bytes=1600000-1600009" } });
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-range")).toBe(`bytes 1600000-1600009/${201 * 40_000 + TAG_ALLOWANCE}`);
+    expect((await response.arrayBuffer()).byteLength).toBe(10);
+    expect(streamCalls().map((url) => url.searchParams.get("timeOffset"))).toEqual(["100", "40"]);
+  });
+
   it("cuts a transcode that runs long at the length it advertised", async () => {
     await new Promise((resolve) => server.close(resolve));
     await start(201 * 40_000 + TAG_ALLOWANCE + 5000);

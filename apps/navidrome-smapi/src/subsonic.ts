@@ -4,7 +4,7 @@ import type { NavidromeServer } from "./config.js";
 const API_VERSION = "1.16.1";
 const CLIENT_NAME = "MiSonos";
 const REQUEST_TIMEOUT_MS = 10000;
-// getAlbumList2 caps `size` at 500; A–Z pages through until a short page.
+// getAlbumList2 caps `size` at 500; A–Z and genres page through until a short page.
 const ALBUM_PAGE_SIZE = 500;
 const MAX_ALBUMS = 10000;
 
@@ -134,17 +134,11 @@ export class SubsonicClient {
 
   async albumList(type: AlbumListType, size = 100): Promise<SubsonicAlbum[]> {
     if (type !== "alphabeticalByName") return this.albumPage({ type, size: Math.min(size, ALBUM_PAGE_SIZE) });
-    const albums: SubsonicAlbum[] = [];
-    for (let offset = 0; offset < MAX_ALBUMS; offset += ALBUM_PAGE_SIZE) {
-      const page = await this.albumPage({ type, size: ALBUM_PAGE_SIZE, offset });
-      albums.push(...page);
-      if (page.length < ALBUM_PAGE_SIZE) break;
-    }
-    return albums;
+    return this.allAlbums({ type });
   }
 
   async albumsByGenre(genre: string): Promise<SubsonicAlbum[]> {
-    return this.albumPage({ type: "byGenre", genre, size: ALBUM_PAGE_SIZE });
+    return this.allAlbums({ type: "byGenre", genre });
   }
 
   async genres(): Promise<SubsonicGenre[]> {
@@ -186,6 +180,17 @@ export class SubsonicClient {
       songCount: 100
     });
     return data.searchResult3 ?? {};
+  }
+
+  // Every album of a list, a page at a time until a short page.
+  private async allAlbums(params: Params): Promise<SubsonicAlbum[]> {
+    const albums: SubsonicAlbum[] = [];
+    for (let offset = 0; offset < MAX_ALBUMS; offset += ALBUM_PAGE_SIZE) {
+      const page = await this.albumPage({ ...params, size: ALBUM_PAGE_SIZE, offset });
+      albums.push(...page);
+      if (page.length < ALBUM_PAGE_SIZE) break;
+    }
+    return albums;
   }
 
   private async albumPage(params: Params): Promise<SubsonicAlbum[]> {
