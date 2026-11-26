@@ -1,34 +1,36 @@
 import { useCallback, useEffect, useState } from "react";
-import type { YouTubeImportStatus } from "@misonos/sonos-protocol";
+import type { SourceSetting, YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { SettingsCard } from "./SettingsSection.js";
 import { bridgeApi } from "./api.js";
 
+interface YouTubeSettingsProps {
+  /** The YouTube Music source, switched on; null when the source list couldn't be read. */
+  youtubeMusic: SourceSetting | null;
+  sourcesVersion: number;
+  onChanged: () => void;
+}
+
 // Everything YouTube in one Settings section: the YouTube Music source's library
 // (your cookies), and pasted YouTube links (played through that source, or downloaded
-// into Navidrome by Downtify). Both depend on YouTube Music being on as a source.
-export function YouTubeSettings({ sourcesVersion, onChanged }: { sourcesVersion: number; onChanged: () => void }) {
-  // undefined while loading; null when the source list couldn't be read.
-  const [youtubeMusic, setYoutubeMusic] = useState<{ enabled: boolean; available: boolean } | null | undefined>(undefined);
+// into Navidrome by Downtify). Both depend on YouTube Music, so Settings leaves the
+// section out while it's switched off.
+export function YouTubeSettings({ youtubeMusic, sourcesVersion, onChanged }: YouTubeSettingsProps) {
   const [links, setLinks] = useState<YouTubeImportStatus | null>(null);
 
   useEffect(() => {
-    void bridgeApi.sourceSettings()
-      .then((settings) => setYoutubeMusic(settings.find((setting) => setting.id === "youtube-music") ?? null))
-      .catch(() => setYoutubeMusic(null));
     void bridgeApi.youtubeStatus().then(setLinks).catch(() => setLinks(null));
   }, [sourcesVersion]);
 
   // No YouTube Music service and no Downtify: nothing YouTube in this MiSonos.
-  if (youtubeMusic === undefined || (!youtubeMusic && !links?.available)) return null;
+  if (!youtubeMusic && !links?.available) return null;
 
-  const on = Boolean(youtubeMusic?.enabled && youtubeMusic.available);
+  const on = Boolean(youtubeMusic?.available);
   return (
     <SettingsCard id="youtube" title="YouTube">
-      {!on ? (
+      {youtubeMusic && !on ? (
         <p className="settings-card-help">
-          {youtubeMusic && !youtubeMusic.available
-            ? "The YouTube Music service isn't running, so YouTube can't be browsed and pasted YouTube links aren't offered."
-            : "YouTube Music is off. Turn it on under Custom Music Services to browse it and to paste YouTube links into the search box."}
+          The YouTube Music service isn&rsquo;t running, so YouTube can&rsquo;t be browsed and pasted YouTube links
+          aren&rsquo;t offered.
         </p>
       ) : null}
 
@@ -154,7 +156,7 @@ function YouTubeMusicLibrary() {
 // keeps the app token Downtify hands out for a pairing code; it never sees a password.
 function YouTubeLinks({ status, disabled, onStatus, onChanged }: {
   status: YouTubeImportStatus;
-  /** YouTube Music is off: the search box doesn't take links, but pairing still works. */
+  /** The YouTube Music service isn't running: the search box doesn't take links, but pairing still works. */
   disabled: boolean;
   onStatus: (status: YouTubeImportStatus) => void;
   onChanged: () => void;
@@ -180,7 +182,7 @@ function YouTubeLinks({ status, disabled, onStatus, onChanged }: {
   return (
     <>
       <p className="settings-card-help">
-        {disabled ? "While YouTube Music is on, paste" : "Paste"} a YouTube video or playlist link into the search box:
+        {disabled ? "Once the YouTube Music service runs, paste" : "Paste"} a YouTube video or playlist link into the search box:
         play it straight from YouTube, or have Downtify download the songs into Navidrome&rsquo;s
         &ldquo;{status.playlist}&rdquo; playlist.
       </p>
