@@ -22,8 +22,9 @@ interface HistoryPanelProps {
 // Rows shown at first, and added by each "Show more".
 const PAGE = 30;
 
+// "16:24": a 24-hour clock, like the build date in Settings.
 function timeLabel(playedAt: Date): string {
-  return playedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return playedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
 function Thumb({ src, live }: { src?: string | null; live?: boolean }) {
