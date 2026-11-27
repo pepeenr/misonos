@@ -864,7 +864,8 @@ export function App() {
   const miniPlayerShown = view !== "main" && !!effectiveNowPlaying?.title;
 
   return (
-    <main className={`app-shell with-tabs${miniPlayerShown ? " with-mini-player" : ""}`}>
+    // Every screen but Playing is a 960px column (page-width); on a PC the header lines up with it.
+    <main className={`app-shell with-tabs${miniPlayerShown ? " with-mini-player" : ""}${view === "main" ? "" : " page-width"}`}>
       {/* The same header on every screen, so nothing shifts when Settings or the group editor opens. */}
       <header className="topbar compact main">
         <GroupDropdown
