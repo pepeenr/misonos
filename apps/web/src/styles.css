@@ -636,6 +636,15 @@ h2 {
   align-items: flex-start;
 }
 
+/* What was wrong with a paste: as wide as the box above it. */
+.settings-card-column > .service-result {
+  align-self: stretch;
+}
+
+.settings-card-textarea[aria-invalid="true"] {
+  border-color: rgba(255, 138, 128, 0.6);
+}
+
 .settings-card-subhead {
   margin: 0;
   font-size: 0.9rem;
