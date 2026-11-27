@@ -2,7 +2,7 @@
 
 `misonos-media-keys.ahk` makes the keyboard's volume knob or keys, mute, and play/pause, next and previous control Sonos instead of this PC. Hold Ctrl with a key to use it for the PC as usual.
 
-- **Which room:** the one last selected in MiSonos, on any device. Grouped rooms move together, like the main volume slider.
+- **Which room:** the one picked in MiSonos on the device that has Settings → Preferences → **Media keys follow this device** on (turn it on in MiSonos on this PC). With no device set, the one last picked in MiSonos on any device, so someone else picking their room elsewhere moves the keys too. Grouped rooms move together, like the main volume slider.
 - **Volume:** 2 per knob click. Volume stays under the cap set in Settings, and turning it while muted unmutes. A tooltip shows the new volume.
 - **Network:** it talks to MiSonos on the home network. The public address is behind Cloudflare Access, which a script can't sign in to.
 

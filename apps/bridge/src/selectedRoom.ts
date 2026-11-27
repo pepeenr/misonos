@@ -5,6 +5,15 @@ import type { SonosGroup } from "@misonos/sonos-protocol";
 // Tools that can't know Sonos group ids, which change on every regroup, act on this
 // room: the keyboard's media keys (scripts/windows/misonos-media-keys.ahk).
 export const SELECTED_GROUP_PREF = "lastGroupKey";
+// The room picked on the one device that has "Media keys follow this device" on in
+// Settings. While it's set, the media keys go there, whatever other devices pick.
+export const MEDIA_KEYS_GROUP_PREF = "mediaKeysGroupKey";
+
+/** Which room key the media keys act on: the media-keys device's, else the last one picked anywhere. */
+export function mediaKeysGroupKey(mediaKeysKey: unknown, lastKey: unknown): string | undefined {
+  if (typeof mediaKeysKey === "string" && mediaKeysKey) return mediaKeysKey;
+  return typeof lastKey === "string" ? lastKey : undefined;
+}
 
 /** The selected group: an exact match, else the group holding most of its rooms, else the first. */
 export function pickSelectedGroup(groups: SonosGroup[], key: string | undefined): SonosGroup | undefined {

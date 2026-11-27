@@ -6,7 +6,7 @@ import { PlayHistoryRecorder } from "./playHistory.js";
 import { QueueReturn } from "./queueReturn.js";
 import { SongRadioError, startSongRadio, type SongRadioPlayer, type SongRadioRequest, type SongRadioSources } from "./songRadio.js";
 import { spotifyTrackFromSonosUri } from "./spotifySonos.js";
-import { pickSelectedGroup, SELECTED_GROUP_PREF, stepVolume } from "./selectedRoom.js";
+import { MEDIA_KEYS_GROUP_PREF, mediaKeysGroupKey, pickSelectedGroup, SELECTED_GROUP_PREF, stepVolume } from "./selectedRoom.js";
 import { SonosEventManager } from "./sonosEvents.js";
 import { SonosService } from "./sonosService.js";
 import type { Store } from "./store/index.js";
@@ -1041,8 +1041,11 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
 
   async function selectedGroup(): Promise<SonosGroup> {
     const snapshot = await service.cachedSnapshot();
-    const key = (await store.getPreference(SELECTED_GROUP_PREF))?.value;
-    const group = pickSelectedGroup(snapshot.groups, typeof key === "string" ? key : undefined);
+    const key = mediaKeysGroupKey(
+      (await store.getPreference(MEDIA_KEYS_GROUP_PREF))?.value,
+      (await store.getPreference(SELECTED_GROUP_PREF))?.value
+    );
+    const group = pickSelectedGroup(snapshot.groups, key);
     if (!group) throw new Error("No Sonos rooms found");
     return group;
   }

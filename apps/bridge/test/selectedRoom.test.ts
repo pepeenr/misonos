@@ -1,6 +1,6 @@
 import type { SonosGroup, SonosZone } from "@misonos/sonos-protocol";
 import { describe, expect, it } from "vitest";
-import { pickSelectedGroup, stepVolume } from "../src/selectedRoom.js";
+import { mediaKeysGroupKey, pickSelectedGroup, stepVolume } from "../src/selectedRoom.js";
 
 const zone = (uuid: string, visible = true) => ({ id: uuid, uuid, name: uuid, ipAddress: "", location: "", visible }) as SonosZone;
 const group = (id: string, zones: SonosZone[]) => ({ id, coordinatorId: zones[0].id, coordinatorName: zones[0].name, zones }) as SonosGroup;
@@ -32,5 +32,17 @@ describe("the room selected in MiSonos", () => {
     // Already above the cap: up does nothing, down still works.
     expect(stepVolume(50, 2, 40)).toBe(50);
     expect(stepVolume(50, -2, 40)).toBe(48);
+  });
+});
+
+describe("which room the media keys act on", () => {
+  it("follows the media-keys device's room while one is set", () => {
+    expect(mediaKeysGroupKey("OFFICE", "LIVING|LIVING_R")).toBe("OFFICE");
+  });
+
+  it("follows the last room picked anywhere when no device is set", () => {
+    expect(mediaKeysGroupKey("", "LIVING|LIVING_R")).toBe("LIVING|LIVING_R");
+    expect(mediaKeysGroupKey(undefined, "LIVING|LIVING_R")).toBe("LIVING|LIVING_R");
+    expect(mediaKeysGroupKey(null, undefined)).toBeUndefined();
   });
 });
