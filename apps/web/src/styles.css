@@ -66,8 +66,8 @@ button {
 
 /* On a PC the header is part of the page. It has the page's own background, fixed to the
    window on both, so it's the same pixels as what's behind it at any scroll; and its row
-   lines up with the screen below: the 960px column on Music, Library, Settings and the
-   group editor (page-width), the full width on Playing. The room picker stays its own size. */
+   lines up with the 960px column every screen uses, so the tabs never move. The room
+   picker stays its own size. */
 @media (min-width: 641px) {
   body {
     background-attachment: fixed;
@@ -78,14 +78,11 @@ button {
       linear-gradient(180deg, rgba(80, 116, 108, 0.16), transparent 34rem) fixed,
       #141716;
     border-bottom-color: transparent;
-  }
-
-  .app-shell.page-width > .topbar.compact.main {
     padding-left: max(24px, calc(24px + (100% - 960px) / 2));
     padding-right: max(24px, calc(24px + (100% - 960px) / 2));
   }
 
-  .app-shell.page-width > .restore-nudge {
+  .app-shell > .restore-nudge {
     max-width: 960px;
     margin-left: auto;
     margin-right: auto;
@@ -253,7 +250,11 @@ button {
   grid-area: auto;
 }
 
+/* Playing is the same 960px column as the other screens. */
 .controller-grid.main-view {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "now" "search" "presets" "queue" "history";
 }
