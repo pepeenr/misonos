@@ -91,6 +91,34 @@ button {
   .topbar.compact.main .topbar-group {
     width: min(100%, 340px);
   }
+
+  /* One row as tall as the tabs and the gear beside it: the group's name, then its rooms. */
+  .topbar.compact.main .topbar-group-trigger {
+    height: 40px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .topbar.compact.main .topbar-group-label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .topbar.compact.main .topbar-group-label strong {
+    flex: 0 1 auto;
+    max-width: 70%;
+  }
+
+  .topbar.compact.main .topbar-group-label small {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .topbar.compact.main .topbar-settings {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 .topbar.compact .topbar-actions {
