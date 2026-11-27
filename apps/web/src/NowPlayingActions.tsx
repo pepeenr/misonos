@@ -95,7 +95,16 @@ export function NowPlayingActions({ groupId, nowPlaying, onPlayed }: NowPlayingA
               aria-label="Spotify login"
               value={accountKey(current)}
               disabled={busy !== null}
-              onChange={(event) => void switchLogin(event.target.value)}
+              onChange={(event) => {
+                // Let go of the focus, so the arrow keys go back to the volume.
+                event.currentTarget.blur();
+                void switchLogin(event.target.value);
+              }}
+              // Arrows on a closed dropdown (Windows) pick the next login at once, which
+              // moves the music to it: so they do nothing here. Alt+↓, F4 or Space open it.
+              onKeyDown={(event) => {
+                if (!event.altKey && /^(Arrow(Up|Down|Left|Right)|Home|End|PageUp|PageDown)$/.test(event.key)) event.preventDefault();
+              }}
             >
               {choices.map((account) => (
                 <option key={accountKey(account)} value={accountKey(account)}>{loginLabel(account)}</option>

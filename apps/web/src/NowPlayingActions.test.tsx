@@ -58,6 +58,18 @@ describe("the controls under the song", () => {
     expect(await screen.findByText("Spotify plays on Mia now.")).toBeTruthy();
   });
 
+  it("lets go of the focus after a switch, and its arrow keys don't switch logins", async () => {
+    render(<NowPlayingActions groupId="g1" nowPlaying={nowPlaying} onPlayed={() => {}} />);
+    const select = await screen.findByRole("combobox", { name: "Spotify login" });
+    select.focus();
+    // On Windows an arrow on the closed dropdown would pick the next login: it mustn't.
+    expect(fireEvent.keyDown(select, { key: "ArrowDown" })).toBe(false);
+    expect(fireEvent.keyDown(select, { key: "ArrowDown", altKey: true })).toBe(true);
+    fireEvent.change(select, { target: { value: "9:5" } });
+    expect(document.activeElement).not.toBe(select);
+    await screen.findByText("Spotify plays on Mia now.");
+  });
+
   it("starts the artist's Spotify radio from the song", async () => {
     const onPlayed = vi.fn();
     render(<NowPlayingActions groupId="g1" nowPlaying={nowPlaying} onPlayed={onPlayed} />);
