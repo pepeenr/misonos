@@ -544,8 +544,14 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     const sourceAuthCookiesMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/auth\/cookies$/);
     if (request.method === "POST" && sourceAuthCookiesMatch) {
       const body = await readJson<{ paste?: string }>(request);
-      if (!body.paste?.trim()) return json(response, { error: "Missing paste" }, 400);
-      return json(response, await service.sourceAuthSetCookies(decodeURIComponent(sourceAuthCookiesMatch[1]), body.paste));
+      if (!body.paste?.trim()) return json(response, { error: "Paste the copied request first." }, 400);
+      try {
+        return json(response, await service.sourceAuthSetCookies(decodeURIComponent(sourceAuthCookiesMatch[1]), body.paste));
+      } catch (error) {
+        // The source says what's wrong with the paste: pass that on as it is.
+        if (error instanceof SourceRequestError && error.status === 400 && error.detail) return json(response, { error: error.detail }, 400);
+        throw error;
+      }
     }
 
     const sourceAuthCookiesClearMatch = url.pathname.match(/^\/api\/sources\/([^/]+)\/auth\/cookies\/clear$/);

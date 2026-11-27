@@ -116,12 +116,13 @@ function YouTubeMusicLibrary() {
   return (
     <>
       <p className="settings-card-help">
-        Search and browse work without signing in. Your Library and My Supermix need your YouTube&nbsp;Music cookies:
-        on a computer, open <a href="https://music.youtube.com" target="_blank" rel="noreferrer">music.youtube.com</a>{" "}
-        (signed in) → DevTools → <strong>Network</strong> → click any <code>/browse</code> request → right-click →
-        <strong> Copy → Copy as cURL</strong>, then paste it below.
+        Search and browse work without signing in. Your Library and My Supermix need the sign-in cookies of your
+        YouTube&nbsp;Music account (<code>SID</code> and <code>SAPISID</code>). On a computer, open{" "}
+        <a href="https://music.youtube.com" target="_blank" rel="noreferrer">music.youtube.com</a> signed in, open
+        DevTools (F12) → <strong>Network</strong>, type <code>browse</code> in the filter, right-click a request →{" "}
+        <strong>Copy → Copy as cURL</strong> (cmd or bash), and paste all of it below.
       </p>
-      {error ? <p className="settings-card-error">{error}</p> : null}
+      {error && !showPaste ? <div className="service-result error" role="alert">{error}</div> : null}
       {cookieSignedIn ? (
         <div className="settings-card-row">
           <span>Library connected.</span>
@@ -134,12 +135,15 @@ function YouTubeMusicLibrary() {
             value={paste}
             disabled={busy}
             placeholder="Paste the full 'Copy as cURL' here…"
-            onChange={(event) => setPaste(event.target.value)}
+            aria-label="Copied request"
+            aria-invalid={error ? true : undefined}
+            onChange={(event) => { setPaste(event.target.value); setError(""); }}
             rows={4}
           />
+          {error ? <div className="service-result error" role="alert">{error}</div> : null}
           <div className="settings-card-row">
             <button type="button" disabled={busy || !paste.trim()} onClick={() => void saveCookies()}>Save cookies</button>
-            <button type="button" className="secondary" disabled={busy} onClick={() => { setShowPaste(false); setPaste(""); }}>Cancel</button>
+            <button type="button" className="secondary" disabled={busy} onClick={() => { setShowPaste(false); setPaste(""); setError(""); }}>Cancel</button>
           </div>
         </div>
       ) : (
