@@ -1017,7 +1017,10 @@ export function createServer(service: SonosService, config: BridgeConfig, store:
     } catch (error) {
       console.error(`[bridge] ${request.method} ${request.url} failed:`, error instanceof Error ? error.message : error);
       if (error instanceof Error && error.stack) console.error(error.stack);
-      json(response, { error: errorMessage(error) }, 500);
+      // Once a reply has started (a stream, an event stream) there's no room for an error
+      // reply: writing one would throw here, outside any catch, and stop the bridge.
+      if (response.headersSent) response.destroy();
+      else json(response, { error: errorMessage(error) }, 500);
     }
   });
   server.on("close", () => sonosEvents.unsubscribeAll());

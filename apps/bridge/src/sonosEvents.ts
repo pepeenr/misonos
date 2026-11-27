@@ -80,7 +80,7 @@ export class SonosEventManager {
     const callbackUrl = `http://${callbackHost}:${this.config.port}/api/sonos-events`;
     const response = await subscribe(ipAddress, serviceType, callbackUrl);
     const sid = response.sid;
-    const renewTimer = this.scheduleRenewal(key, groupId, ipAddress, serviceType, callbackUrl, response.timeoutSeconds);
+    const renewTimer = this.scheduleRenewal(key, ipAddress, serviceType, callbackUrl, response.timeoutSeconds);
     const subscription: EventSubscription = { groupId, ipAddress, serviceType, sid, renewTimer };
     this.subscriptionsByKey.set(key, subscription);
     this.subscriptionsBySid.set(sid, subscription);
@@ -88,7 +88,6 @@ export class SonosEventManager {
 
   private scheduleRenewal(
     key: string,
-    groupId: string,
     ipAddress: string,
     serviceType: EventServiceType,
     callbackUrl: string,
@@ -98,16 +97,18 @@ export class SonosEventManager {
     const timer = setTimeout(async () => {
       const current = this.subscriptionsByKey.get(key);
       if (!current) return;
+      // The speaker's group now, not when this timer was set: it changes on every regroup.
+      const currentGroupId = current.groupId;
       try {
         const response = await renew(ipAddress, serviceType, current.sid);
         clearTimeout(current.renewTimer);
-        current.renewTimer = this.scheduleRenewal(key, groupId, ipAddress, serviceType, callbackUrl, response.timeoutSeconds);
+        current.renewTimer = this.scheduleRenewal(key, ipAddress, serviceType, callbackUrl, response.timeoutSeconds);
       } catch {
         clearTimeout(current.renewTimer);
         this.subscriptionsByKey.delete(key);
         this.subscriptionsBySid.delete(current.sid);
         try {
-          await this.ensureSubscription(groupId, ipAddress, serviceType);
+          await this.ensureSubscription(currentGroupId, ipAddress, serviceType);
         } catch (error) {
           console.warn(`[sonos-events] renewal failed for ${serviceType} on ${ipAddress}: ${errorMessage(error)}`);
         }
