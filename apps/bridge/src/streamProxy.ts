@@ -32,7 +32,7 @@ export async function proxyStream(
   const peer = request.socket.remoteAddress ?? "?";
   const range = request.headers.range ?? "-";
   console.log(`[stream-proxy] ${request.method} ${sourceId}/${trackId} from ${peer} range=${range}`);
-  let cached: CachedTrack | undefined;
+  let cached: CachedTrack & { reused: boolean };
   try {
     cached = await getCachedTrack(sourceId, trackId);
   } catch (error) {
@@ -45,27 +45,22 @@ export async function proxyStream(
   }
 
   const isHead = request.method === "HEAD";
-  const upstreamHeaders: Record<string, string> = {
-    accept: "*/*",
-    "user-agent": BROWSER_USER_AGENT
-  };
-  for (const [key, value] of Object.entries(request.headers)) {
-    if (!FETCH_HEADERS_PASSTHROUGH.has(key.toLowerCase())) continue;
-    if (Array.isArray(value)) upstreamHeaders[key] = value.join(", ");
-    else if (typeof value === "string") upstreamHeaders[key] = value;
-  }
-  if (/googlevideo|youtube/i.test(cached.url)) {
-    upstreamHeaders.origin = "https://music.youtube.com";
-    upstreamHeaders.referer = "https://music.youtube.com/";
-  }
-
   let upstream: Response;
   try {
-    upstream = await fetch(cached.url, {
-      method: isHead ? "HEAD" : "GET",
-      headers: upstreamHeaders,
-      redirect: "follow"
-    });
+    upstream = await openUpstream(cached.url, request);
+    // A stream URL found earlier can stop working while it's kept (a YouTube URL is
+    // bound to the public IP it was found from): find the track's stream again, once,
+    // rather than fail a song that the speaker is partway through.
+    if (!upstream.ok && upstream.status !== 416) {
+      trackUrlCache.delete(cacheKey(sourceId, trackId));
+      if (cached.reused) {
+        await upstream.body?.cancel().catch(() => undefined);
+        console.warn(`[stream-proxy] kept stream URL answered ${upstream.status}; looking ${sourceId}/${trackId} up again`);
+        cached = await getCachedTrack(sourceId, trackId);
+        upstream = await openUpstream(cached.url, request);
+        if (!upstream.ok && upstream.status !== 416) trackUrlCache.delete(cacheKey(sourceId, trackId));
+      }
+    }
     console.log(`[stream-proxy] upstream ${upstream.status} ${upstream.headers.get("content-type") ?? ""} len=${upstream.headers.get("content-length") ?? "?"}`);
   } catch (error) {
     console.warn(`[stream-proxy] upstream fetch failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -112,11 +107,38 @@ export async function proxyStream(
   nodeStream.pipe(response);
 }
 
-async function getCachedTrack(sourceId: string, trackId: string): Promise<CachedTrack> {
-  const key = `${sourceId}\u0000${trackId}`;
+// The upstream request for a stream URL, carrying the speaker's Range.
+function openUpstream(url: string, request: http.IncomingMessage): Promise<Response> {
+  const headers: Record<string, string> = {
+    accept: "*/*",
+    "user-agent": BROWSER_USER_AGENT
+  };
+  for (const [key, value] of Object.entries(request.headers)) {
+    if (!FETCH_HEADERS_PASSTHROUGH.has(key.toLowerCase())) continue;
+    if (Array.isArray(value)) headers[key] = value.join(", ");
+    else if (typeof value === "string") headers[key] = value;
+  }
+  if (/googlevideo|youtube/i.test(url)) {
+    headers.origin = "https://music.youtube.com";
+    headers.referer = "https://music.youtube.com/";
+  }
+  return fetch(url, {
+    method: request.method === "HEAD" ? "HEAD" : "GET",
+    headers,
+    redirect: "follow"
+  });
+}
+
+function cacheKey(sourceId: string, trackId: string): string {
+  return `${sourceId}\u0000${trackId}`;
+}
+
+// A track's stream URL, found by its source or kept from a few minutes ago (`reused`).
+async function getCachedTrack(sourceId: string, trackId: string): Promise<CachedTrack & { reused: boolean }> {
+  const key = cacheKey(sourceId, trackId);
   const now = Date.now();
   const cached = trackUrlCache.get(key);
-  if (cached && cached.expires > now) return cached;
+  if (cached && cached.expires > now) return { ...cached, reused: true };
   const info = await fetchTrack(sourceId, trackId);
   const entry: CachedTrack = {
     url: info.url,
@@ -124,7 +146,7 @@ async function getCachedTrack(sourceId: string, trackId: string): Promise<Cached
     expires: now + TRACK_CACHE_TTL_MS
   };
   trackUrlCache.set(key, entry);
-  return entry;
+  return { ...entry, reused: false };
 }
 
 function fail(response: http.ServerResponse, status: number, message: string): void {
