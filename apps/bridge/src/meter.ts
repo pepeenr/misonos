@@ -22,6 +22,8 @@ type Window = [lr: number, rr: number, lp: number, rp: number];
 
 interface MeterStream {
   ff: ChildProcessWithoutNullStreams | null;
+  // The decoder has quit: the windows are all this stream will get.
+  done: boolean;
   windows: Window[];
   subscribers: Set<http.ServerResponse>;
   leftover: Buffer;
@@ -46,7 +48,9 @@ export function meterStream(sourceId: string, trackId: string, bytes: Readable, 
   if (!ffmpegOk) return;
   if (range && !/^bytes=0-/.test(range)) return; // only decode a from-start fetch
   const key = keyOf(sourceId, trackId);
-  if (streams.has(key)) { streams.get(key)!.lastTouched = Date.now(); return; }
+  const existing = streams.get(key);
+  // Already being decoded: the speaker opened the track twice (a probe, then the play).
+  if (existing?.ff && !existing.done) { existing.lastTouched = Date.now(); return; }
 
   let ff: ChildProcessWithoutNullStreams;
   try {
@@ -55,11 +59,26 @@ export function meterStream(sourceId: string, trackId: string, bytes: Readable, 
     ffmpegOk = false;
     return;
   }
-  evictIfNeeded();
-  const stream: MeterStream = { ff, windows: [], subscribers: new Set(), leftover: Buffer.alloc(0), lastTouched: Date.now() };
-  streams.set(key, stream);
+  let stream: MeterStream;
+  if (existing) {
+    // A meter opened before the speaker fetched the track waits here; or the track plays
+    // again, and its last decode may have stopped partway (the song was skipped then).
+    // Decode it afresh, and start the open meters over with it.
+    stream = existing;
+    const startOver = existing.windows.length > 0;
+    Object.assign(stream, { ff, done: false, windows: [], leftover: Buffer.alloc(0), lastTouched: Date.now() });
+    if (startOver) {
+      const restart = initEvent(stream);
+      for (const res of stream.subscribers) res.write(restart);
+    }
+  } else {
+    evictIfNeeded();
+    stream = { ff, done: false, windows: [], subscribers: new Set(), leftover: Buffer.alloc(0), lastTouched: Date.now() };
+    streams.set(key, stream);
+  }
 
   ff.on("error", () => { ffmpegOk = false; dropStream(key); });
+  ff.on("close", () => { if (stream.ff === ff) stream.done = true; });
   ff.stdout.on("data", (chunk: Buffer) => consumePcm(stream, chunk));
   // Its complaints about the input are of no use here, but a stderr pipe nobody reads
   // fills up and stalls ffmpeg.
@@ -123,13 +142,18 @@ export function subscribeMeter(sourceId: string, trackId: string, res: http.Serv
   if (!stream) {
     // No proxied stream yet (the speaker may not have started fetching) — hold the
     // connection open so windows flow once metering begins.
-    stream = { ff: null, windows: [], subscribers: new Set(), leftover: Buffer.alloc(0), lastTouched: Date.now() };
+    stream = { ff: null, done: false, windows: [], subscribers: new Set(), leftover: Buffer.alloc(0), lastTouched: Date.now() };
     streams.set(key, stream);
   }
   stream.subscribers.add(res);
   stream.lastTouched = Date.now();
-  res.write(`event: init\ndata: ${JSON.stringify({ windowMs: WINDOW_MS, windows: stream.windows })}\n\n`);
+  res.write(initEvent(stream));
   res.on("close", () => { stream!.subscribers.delete(res); });
+}
+
+// The windows decoded so far; a meter replaces what it holds with them.
+function initEvent(stream: MeterStream): string {
+  return `event: init\ndata: ${JSON.stringify({ windowMs: WINDOW_MS, windows: stream.windows })}\n\n`;
 }
 
 function dropStream(key: string): void {
