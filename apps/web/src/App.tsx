@@ -164,6 +164,11 @@ export function App() {
     const next = applyPendingGroupEdits(groups, pendingGroupEdits);
     return [...next].sort((a, b) => membershipKey(a).localeCompare(membershipKey(b)));
   }, [groups, pendingGroupEdits]);
+  // Every room shown, for Settings (Equalizer, Alarms, Custom Music Services).
+  const householdZones = useMemo(() => displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible), [displayGroups]);
+  // A Sonos household is all S1 or all S2. On S2 there's nothing to register on a
+  // speaker, so Custom Music Services is only of interest with the developer panels.
+  const allZonesS2 = householdZones.length > 0 && householdZones.every((zone) => zone.swGen === 2);
 
   const selectedGroup = useMemo(
     () => (localMode ? undefined : groups.find((group) => group.id === selectedGroupId) ?? groups[0]),
@@ -989,18 +994,18 @@ export function App() {
             }}
             onShowShortcuts={() => setShortcutsOpen(true)}
           />
-          <MusicOrderSettings customIcons={customIcons} sourcesVersion={sourcesVersion} />
-          <SourceLogoSettings customIcons={customIcons} sourcesVersion={sourcesVersion} onChanged={() => void refreshCustomIcons()} />
-          <Equalizer zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
-          <Alarms zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)} />
+          {/* The speakers */}
+          <Equalizer zones={householdZones} />
+          <Alarms zones={householdZones} />
           <AboutSystem />
-          {/* The switches come first, so a section they hide never moves the switch. */}
+          {/* The music sources. The switches come first, so a section they hide never moves the switch. */}
           <MusicSources
             settings={sources.settings}
             toggleError={sources.toggleError}
             customIcons={customIcons}
             onToggle={(sourceId, enabled) => void sources.toggle(sourceId, enabled)}
             onLoginChanged={sourcesChanged}
+            onLogoChanged={() => void refreshCustomIcons()}
           />
           {sourceSectionShown(sources.settings, "spotify") ? <SpotifySettings onSourcesChanged={sourcesChanged} /> : null}
           {sourceSectionShown(sources.settings, "youtube-music") ? (
@@ -1010,11 +1015,9 @@ export function App() {
               onChanged={sourcesChanged}
             />
           ) : null}
-          {sources.settings !== undefined ? (
-            <CustomMusicServices
-              zones={displayGroups.flatMap((group) => group.zones).filter((zone) => zone.visible)}
-              disabledSourceIds={disabledSourceIds(sources.settings)}
-            />
+          <MusicOrderSettings customIcons={customIcons} sourcesVersion={sourcesVersion} />
+          {sources.settings !== undefined && (!allZonesS2 || showDevPanels) ? (
+            <CustomMusicServices zones={householdZones} disabledSourceIds={disabledSourceIds(sources.settings)} />
           ) : null}
           {showDevPanels ? (
             <>
@@ -2356,41 +2359,109 @@ interface MusicSourcesProps {
   onToggle: (sourceId: string, enabled: boolean) => void;
   /** Navidrome's login changed: it may have appeared or vanished. */
   onLoginChanged: () => void;
+  /** A source's own logo was uploaded or reset. */
+  onLogoChanged: () => void;
 }
 
 // The on/off switch of every source the bridge knows. A switched-off source is gone
 // from Music and its own Settings (Spotify, YouTube, Navidrome's login, registration).
-function MusicSources({ settings, toggleError, customIcons, onToggle, onLoginChanged }: MusicSourcesProps) {
+// A switched-on source's row also takes a logo of your own.
+function MusicSources({ settings, toggleError, customIcons, onToggle, onLoginChanged, onLogoChanged }: MusicSourcesProps) {
+  const [logoBusy, setLogoBusy] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState("");
+  const logoInputs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const changeLogo = useCallback(async (sourceId: string, action: () => Promise<unknown>, failure: string) => {
+    setLogoBusy(sourceId);
+    setLogoError("");
+    try {
+      await action();
+      onLogoChanged();
+    } catch (err) {
+      setLogoError(err instanceof Error ? err.message : failure);
+    } finally {
+      setLogoBusy(null);
+    }
+  }, [onLogoChanged]);
+
+  const uploadLogo = (sourceId: string, file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setLogoError("Please choose an image file."); return; }
+    void changeLogo(sourceId, () => bridgeApi.uploadSourceIcon(sourceId, file), "Upload failed");
+  };
+
   if (!settings?.length) return null;
   return (
     <SettingsSection id="music-sources" title="Music sources">
       <p className="pref-hint">
         Switch a source off to hide it from Music on every device, along with its settings here. Favorites, playlists
-        and queued tracks from it still play.
+        and queued tracks from it still play. The upload button puts a logo of your own on a source: SVG, PNG, JPEG,
+        WebP or GIF, up to 2 MB.
       </p>
       {toggleError ? <div className="service-result error">{toggleError}</div> : null}
+      {logoError ? <div className="service-result error">{logoError}</div> : null}
       <div className="source-toggles">
-        {settings.map((source) => (
-          <Fragment key={source.id}>
-            <label className={source.enabled ? "pref-row source-toggle" : "pref-row source-toggle off"}>
-              <span className="source-toggle-name">
-                <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
-                <span className="pref-label">
-                  <strong>{source.name}</strong>
-                  {source.available ? null : <small>Not running or not configured</small>}
+        {settings.map((source) => {
+          const switchId = `source-switch-${source.id}`;
+          const busy = logoBusy === source.id;
+          return (
+            <Fragment key={source.id}>
+              <div className={source.enabled ? "pref-row source-toggle" : "pref-row source-toggle off"}>
+                <label className="source-toggle-name" htmlFor={switchId}>
+                  <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
+                  <span className="pref-label">
+                    <strong>{source.name}</strong>
+                    {source.available ? null : <small>Not running or not configured</small>}
+                  </span>
+                </label>
+                <span className="source-toggle-actions">
+                  {source.enabled ? (
+                    <>
+                      <input
+                        ref={(element) => { logoInputs.current[source.id] = element; }}
+                        type="file"
+                        accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif"
+                        hidden
+                        onChange={(event) => { uploadLogo(source.id, event.target.files?.[0]); event.target.value = ""; }}
+                      />
+                      <button
+                        type="button"
+                        className="browse-action"
+                        title="Upload logo"
+                        aria-label={`Upload logo for ${source.name}`}
+                        disabled={busy}
+                        onClick={() => logoInputs.current[source.id]?.click()}
+                      >
+                        <Upload size={15} />
+                      </button>
+                      {customIcons[source.id] ? (
+                        <button
+                          type="button"
+                          className="browse-action"
+                          title="Reset to the default logo"
+                          aria-label={`Reset ${source.name} logo`}
+                          disabled={busy}
+                          onClick={() => void changeLogo(source.id, () => bridgeApi.deleteSourceIcon(source.id), "Reset failed")}
+                        >
+                          <RotateCcw size={15} />
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
+                  <input
+                    id={switchId}
+                    type="checkbox"
+                    role="switch"
+                    aria-label={`Show ${source.name}`}
+                    checked={source.enabled}
+                    onChange={(event) => onToggle(source.id, event.target.checked)}
+                  />
                 </span>
-              </span>
-              <input
-                type="checkbox"
-                role="switch"
-                aria-label={`Show ${source.name}`}
-                checked={source.enabled}
-                onChange={(event) => onToggle(source.id, event.target.checked)}
-              />
-            </label>
-            {source.id === "navidrome" && source.enabled ? <NavidromeLogin onChanged={onLoginChanged} /> : null}
-          </Fragment>
-        ))}
+              </div>
+              {source.id === "navidrome" && source.enabled ? <NavidromeLogin onChanged={onLoginChanged} /> : null}
+            </Fragment>
+          );
+        })}
       </div>
     </SettingsSection>
   );
@@ -2908,99 +2979,6 @@ function Equalizer({ zones }: EqualizerProps) {
   );
 }
 
-interface SourceLogoSettingsProps {
-  customIcons: Record<string, string>;
-  sourcesVersion: number;
-  onChanged: () => void;
-}
-
-function SourceLogoSettings({ customIcons, sourcesVersion, onChanged }: SourceLogoSettingsProps) {
-  const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>>>([]);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const inputs = useRef<Record<string, HTMLInputElement | null>>({});
-
-  useEffect(() => {
-    void bridgeApi.listSources().then(setSources).catch(() => undefined);
-  }, [sourcesVersion]);
-
-  const upload = useCallback(async (sourceId: string, file: File | undefined) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) { setError("Please choose an image file."); return; }
-    setBusyId(sourceId);
-    setError("");
-    try {
-      await bridgeApi.uploadSourceIcon(sourceId, file);
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setBusyId(null);
-    }
-  }, [onChanged]);
-
-  const reset = useCallback(async (sourceId: string) => {
-    setBusyId(sourceId);
-    setError("");
-    try {
-      await bridgeApi.deleteSourceIcon(sourceId);
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Reset failed");
-    } finally {
-      setBusyId(null);
-    }
-  }, [onChanged]);
-
-  return (
-    <SettingsSection id="service-logos" title="Service logos">
-      <p className="pref-hint">Upload your own logo for a music service. SVG, PNG, JPEG, WebP, or GIF up to 2 MB.</p>
-      {error ? <div className="empty-panel error-panel"><span>{error}</span></div> : null}
-      <ul className="logo-list">
-        {sources.map((source) => {
-          const hasCustom = !!customIcons[source.id];
-          const busy = busyId === source.id;
-          return (
-            <li key={source.id} className="logo-row">
-              <ServiceIcon sourceId={source.id} customVersion={customIcons[source.id]} />
-              <span className="logo-name">{source.name}</span>
-              <input
-                ref={(element) => { inputs.current[source.id] = element; }}
-                type="file"
-                accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif"
-                hidden
-                onChange={(event) => { void upload(source.id, event.target.files?.[0]); event.target.value = ""; }}
-              />
-              <button
-                type="button"
-                className="browse-action"
-                title="Upload logo"
-                aria-label={`Upload logo for ${source.name}`}
-                disabled={busy}
-                onClick={() => inputs.current[source.id]?.click()}
-              >
-                <Upload size={15} />
-              </button>
-              {hasCustom ? (
-                <button
-                  type="button"
-                  className="browse-action"
-                  title="Reset to default"
-                  aria-label={`Reset ${source.name} logo`}
-                  disabled={busy}
-                  onClick={() => void reset(source.id)}
-                >
-                  <RotateCcw size={15} />
-                </button>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-    </SettingsSection>
-  );
-}
-
 interface PreferencesProps {
   showDevPanels: boolean;
   onShowDevPanelsChange: (value: boolean) => void;
@@ -3087,7 +3065,7 @@ function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChrom
       <label className="pref-row">
         <span className="pref-label">
           <strong>Show developer panels</strong>
-          <small>Reveal the Music Services and Browse debug tools below.</small>
+          <small>Reveal the Music Services and Browse debug tools below, and Custom Music Services on S2 speakers, where there&rsquo;s nothing to register.</small>
         </span>
         <input
           type="checkbox"
