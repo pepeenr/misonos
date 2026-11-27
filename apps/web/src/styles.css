@@ -80,12 +80,15 @@ button {
     border-bottom-color: transparent;
     padding-left: max(24px, calc(24px + (100% - 960px) / 2));
     padding-right: max(24px, calc(24px + (100% - 960px) / 2));
+    /* 16px from the header's row to the first card, the same as between cards
+       (7 + its 1px border + 8). */
+    padding-bottom: 7px;
+    margin-bottom: 8px;
   }
 
   .app-shell > .restore-nudge {
     max-width: 960px;
-    margin-left: auto;
-    margin-right: auto;
+    margin: 0 auto 16px;
   }
 
   .topbar.compact.main .topbar-group {
@@ -284,7 +287,14 @@ button {
   max-width: 960px;
   margin: 0 auto;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "now" "search" "presets" "queue" "history";
+  /* Cards stack in page order. Named rows would leave an empty row, and a second gap,
+     wherever a card is hidden (Presets usually, the queue for a radio stream). */
+  grid-template-areas: none;
+}
+
+.controller-grid.main-view > *,
+.controller-grid.main-view > .queue-panel.history-panel {
+  grid-area: auto;
 }
 
 /* Music's search box, as a card on the main screen (rendered by SourceBrowser). */
