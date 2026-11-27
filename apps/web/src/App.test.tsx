@@ -575,6 +575,68 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("switch", { name: /Show developer panels/ }));
     expect(await screen.findByRole("region", { name: "Custom music services" })).toBeInTheDocument();
   });
+
+  it("says on the main screen why a skip didn't happen, in words rather than the speaker's code", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
+      if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
+      if (url.endsWith("/api/sources")) return json([]);
+      if (url.endsWith("/transport")) return new Response(JSON.stringify({ error: "UPnPError (code=711)" }), { status: 500 });
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Last song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([{ id: "q1", title: "Last song" }]);
+      return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    const next = await screen.findByRole("button", { name: "Next" });
+    await waitFor(() => expect(next).not.toBeDisabled());
+    fireEvent.click(next);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't skip to the next song");
+  });
+
+  it("keeps the room switched to when the room left behind answers late", async () => {
+    window.localStorage.clear();
+    const zones = [
+      { id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true },
+      { id: "z2", uuid: "z2", name: "Office", ipAddress: "10.0.0.3", location: "", visible: true }
+    ];
+    const groups = [
+      { id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [zones[0]] },
+      { id: "g2", coordinatorId: "z2", coordinatorName: "Office", zones: [zones[1]] }
+    ];
+    // The Kitchen's answers hold until the test lets them through.
+    let releaseKitchen: () => void = () => undefined;
+    const kitchenHeld = new Promise<void>((resolve) => { releaseKitchen = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/api/groups")) return json(groups);
+      if (url.endsWith("/api/zones")) return json(zones);
+      if (url.endsWith("/api/sources")) return json([]);
+      if (url.endsWith("/api/groups/g1/now-playing")) {
+        await kitchenHeld;
+        return json({ groupId: "g1", state: "PLAYING", title: "Kitchen song", updatedAt: new Date().toISOString() });
+      }
+      if (url.endsWith("/api/groups/g1/queue")) {
+        await kitchenHeld;
+        return json([{ id: "k1", title: "Kitchen song" }]);
+      }
+      if (url.endsWith("/api/groups/g2/now-playing")) return json({ groupId: "g2", state: "PLAYING", title: "Office song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/api/groups/g2/queue")) return json([{ id: "o1", title: "Office song" }]);
+      if (/\/api\/zones\/z\d\/volume$/.test(url)) return json({ id: url.includes("z1") ? "z1" : "z2", volume: 10, muted: false });
+      return json({ groups, zones });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+
+    await screen.findByRole("slider", { name: "Kitchen volume" });
+    // G: the next room.
+    fireEvent.keyDown(window, { key: "g", code: "KeyG" });
+    expect(await screen.findAllByText("Office song")).not.toHaveLength(0);
+    await act(async () => {
+      releaseKitchen();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.queryAllByText("Kitchen song")).toHaveLength(0);
+    expect(screen.getAllByText("Office song")).not.toHaveLength(0);
+  });
 });
 
 // Settings with three sources (Spotify, YouTube Music, Grateful Dead), all running; the

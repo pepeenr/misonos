@@ -231,8 +231,10 @@ export function VuMeter({ getAnalysers, meterUrl, getPosition, isLive, isPlaying
       try {
         const d = JSON.parse((e as MessageEvent).data) as { windowMs: number; windows: number[][] };
         windowSec = (d.windowMs || 40) / 1000;
+        // One by one: spread into push(), an hour and a half of windows (a long concert
+        // set, a podcast) is more arguments than a call takes, and the meter stayed dark.
         windows.length = 0;
-        windows.push(...d.windows);
+        for (const entry of d.windows) windows.push(entry);
         setActive(true);
       } catch { /* ignore */ }
     });

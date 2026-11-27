@@ -43,6 +43,8 @@ import { useKeyboardShortcuts } from "./shortcuts.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
 import { MiniPlayer, ViewTabs } from "./Navigation.js";
 import { useViewHistory } from "./viewHistory.js";
+import { sameQueue } from "./queueRows.js";
+import { actionError } from "./actionError.js";
 
 const GroupEditor = lazy(() => import("./GroupEditor.js").then((module) => ({ default: module.GroupEditor })));
 const LibraryView = lazy(() => import("./LibraryView.js").then((module) => ({ default: module.LibraryView })));
@@ -58,6 +60,14 @@ const LOCAL_DEVICE_ID = "local-device";
 // the previous queue back by itself (3 s, plus the time to queue it again).
 const QUEUE_RETURN_GRACE_MS = 12_000;
 const DEVICE_OPTION: GroupOption = { id: LOCAL_DEVICE_ID, key: LOCAL_DEVICE_ID, name: "This device", color: "", zoneList: "Plays in this browser", device: true };
+const TRANSPORT_FAILED: Record<TransportAction, string> = {
+  play: "Couldn't start playing",
+  pause: "Couldn't pause",
+  stop: "Couldn't stop",
+  next: "Couldn't skip to the next song",
+  previous: "Couldn't go back a song"
+};
+const VOLUME_FAILED = "Couldn't change the volume";
 
 // Progress shape (matching playbackProgressFromNowPlaying) for the local player.
 function localPlaybackProgress(position: number, duration: number) {
@@ -78,7 +88,8 @@ export function App() {
   const [queueState, setQueueState] = useState<QueueState>("idle");
   const [queueError, setQueueError] = useState<string>("");
   const [zoneVolumes, setZoneVolumes] = useState<Record<string, VolumeState>>({});
-  const [groupVolume, setGroupVolume] = useState<VolumeState | null>(null);
+  // The last group volume read; `groupVolume` below is it while it's the shown group's.
+  const [groupVolumeState, setGroupVolume] = useState<VolumeState | null>(null);
   const [volumePopoverOpen, setVolumePopoverOpen] = useState(false);
   const [playbackTick, setPlaybackTick] = useState(0);
   const [groupEditBusy, setGroupEditBusy] = useState(false);
@@ -92,7 +103,17 @@ export function App() {
   const [queueDragReorder, setQueueDragReorder] = useState<boolean>(() => readLocalPref(QUEUE_DRAG_REORDER_PREF) ?? false);
   // Per device: the keyboard's media keys follow the room picked here.
   const [mediaKeysHere, setMediaKeysHere] = useState<boolean>(() => readLocalPref(MEDIA_KEYS_DEVICE_PREF) ?? false);
+  // The connection's state, on the Settings page.
   const [message, setMessage] = useState("Ready");
+  // What an action did, or why it failed, shown for a moment over the bottom of the screen.
+  const [notice, setNotice] = useState<{ ok: boolean; text: string; at: number } | null>(null);
+  const notify = useCallback((text: string, ok = true) => setNotice({ ok, text, at: Date.now() }), []);
+  const notifyError = useCallback((error: unknown, fallback: string) => notify(actionError(error, fallback), false), [notify]);
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(null), notice.ok ? 3500 : 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   const accessSignedOut = useAccessSignedOut();
   const [searchSlot, setSearchSlot] = useState<HTMLDivElement | null>(null);
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
@@ -179,6 +200,8 @@ export function App() {
     [groups, selectedGroupId, localMode]
   );
 
+  const groupVolume = groupVolumeState && groupVolumeState.id === selectedGroup?.id ? groupVolumeState : null;
+
   const selectedVisibleZones = useMemo(
     () => selectedGroup?.zones.filter((zone) => zone.visible) ?? [],
     [selectedGroup]
@@ -188,6 +211,14 @@ export function App() {
     () => selectedVisibleZones.find((zone) => zone.uuid === selectedGroup?.coordinatorId) ?? selectedVisibleZones[0],
     [selectedGroup, selectedVisibleZones]
   );
+
+  // The room the answers of async loads must still be for when they land: one asked
+  // just before a switch to another room would otherwise show that room's song.
+  const shownGroupIdRef = useRef<string | undefined>(undefined);
+  shownGroupIdRef.current = selectedGroup?.id;
+  const showNowPlaying = useCallback((next: NowPlaying) => {
+    if (next.groupId === shownGroupIdRef.current) setNowPlaying(next);
+  }, []);
 
   const primaryVolume = useMemo(() => {
     if (!selectedGroup) return null;
@@ -307,9 +338,14 @@ export function App() {
     return () => { cancelled = true; };
   }, []);
 
+  // Polled: a bridge that's away for a moment (a deploy) shows on the next answer.
   const loadNowPlaying = useCallback(async (groupId: string) => {
-    setNowPlaying(await bridgeApi.nowPlaying(groupId));
-  }, []);
+    try {
+      showNowPlaying(await bridgeApi.nowPlaying(groupId));
+    } catch {
+      /* the next poll tries again */
+    }
+  }, [showNowPlaying]);
 
   const loadQueue = useCallback(async (groupId: string, background = false) => {
     if (!background) {
@@ -318,17 +354,20 @@ export function App() {
     }
     try {
       const next = await bridgeApi.queue(groupId);
-      setQueue(next);
+      if (shownGroupIdRef.current !== groupId) return;
+      // A queue that hasn't changed keeps its rows: a long one re-renders on every poll otherwise.
+      setQueue((current) => (sameQueue(current, next) ? current : next));
       setQueueState("ready");
     } catch (error) {
-      if (background) return;
+      if (background || shownGroupIdRef.current !== groupId) return;
       setQueueState("error");
       setQueueError(error instanceof Error ? error.message : "Could not load queue");
     }
   }, []);
 
-  const applyVolumes = useCallback((nextGroupVolume: VolumeState | null, nextZoneVolumes: Array<VolumeState | null>) => {
-    setGroupVolume(nextGroupVolume);
+  // `undefined` leaves the group volume as it is.
+  const applyVolumes = useCallback((nextGroupVolume: VolumeState | null | undefined, nextZoneVolumes: Array<VolumeState | null>) => {
+    if (nextGroupVolume !== undefined) setGroupVolume(nextGroupVolume);
     setZoneVolumes((current) => {
       const next = { ...current };
       for (const volume of nextZoneVolumes) {
@@ -344,7 +383,8 @@ export function App() {
       visibleZones.length > 1 ? bridgeApi.groupVolume(group.id).catch(() => null) : Promise.resolve(null),
       Promise.all(visibleZones.map((zone) => bridgeApi.zoneVolume(zone.id).catch(() => null)))
     ]);
-    applyVolumes(nextGroupVolume, nextZoneVolumes);
+    // Rooms' own volumes are kept by room; the group volume only for the room shown.
+    applyVolumes(shownGroupIdRef.current === group.id ? nextGroupVolume : undefined, nextZoneVolumes);
   }, [applyVolumes]);
 
   const loadSnapshot = useCallback(async (force = false) => {
@@ -470,17 +510,21 @@ export function App() {
     const nudge = recentNudge;
     setRecentNudge(null);
     try {
-      setNowPlaying(await bridgeApi.restoreRecentQueue(nudge.id, selectedGroup.id));
-      setMessage(`Restored “${nudge.title}”.`);
+      showNowPlaying(await bridgeApi.restoreRecentQueue(nudge.id, selectedGroup.id));
+      notify(`Restored “${nudge.title}”.`);
       void loadQueue(selectedGroup.id);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not restore queue");
+      notifyError(error, "Couldn't restore the queue");
     }
   };
 
   const runTransport = async (action: TransportAction) => {
     if (!selectedGroup) return;
-    setNowPlaying(await bridgeApi.transport(selectedGroup.id, action));
+    try {
+      showNowPlaying(await bridgeApi.transport(selectedGroup.id, action));
+    } catch (error) {
+      notifyError(error, TRANSPORT_FAILED[action]);
+    }
     void loadNowPlaying(selectedGroup.id);
   };
 
@@ -512,9 +556,9 @@ export function App() {
       setGroupPlayback((current) => ({ ...current, [groupId]: next.state }));
       setNowPlaying((current) => (current && current.groupId === groupId ? next : current));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not change playback");
+      notifyError(error, TRANSPORT_FAILED[action]);
     }
-  }, []);
+  }, [notifyError]);
 
   const pauseAllGroups = useCallback(async () => {
     localPlayer.pause(); // "all zones" includes the in-browser device
@@ -529,31 +573,38 @@ export function App() {
 
   const runSeek = async (positionSeconds: number) => {
     if (!selectedGroup) return;
-    setNowPlaying(await bridgeApi.seek(selectedGroup.id, positionSeconds));
+    try {
+      showNowPlaying(await bridgeApi.seek(selectedGroup.id, positionSeconds));
+    } catch (error) {
+      notifyError(error, "Couldn't jump to that point in the song");
+    }
     void loadNowPlaying(selectedGroup.id);
   };
 
-  const cycleRepeat = async () => {
+  // A change to how the room plays (repeat, shuffle, crossfade, sleep timer).
+  const changePlayback = async (request: (groupId: string) => Promise<NowPlaying>, failed: string) => {
     if (!selectedGroup) return;
+    try {
+      showNowPlaying(await request(selectedGroup.id));
+    } catch (error) {
+      notifyError(error, failed);
+    }
+  };
+
+  const cycleRepeat = () => {
     const order: RepeatMode[] = ["none", "all", "one"];
     const next = order[(order.indexOf(nowPlaying?.repeat ?? "none") + 1) % order.length];
-    setNowPlaying(await bridgeApi.setPlayMode(selectedGroup.id, next, nowPlaying?.shuffle ?? false));
+    return changePlayback((groupId) => bridgeApi.setPlayMode(groupId, next, nowPlaying?.shuffle ?? false), "Couldn't change repeat");
   };
 
-  const toggleShuffle = async () => {
-    if (!selectedGroup) return;
-    setNowPlaying(await bridgeApi.setPlayMode(selectedGroup.id, nowPlaying?.repeat ?? "none", !(nowPlaying?.shuffle ?? false)));
-  };
+  const toggleShuffle = () =>
+    changePlayback((groupId) => bridgeApi.setPlayMode(groupId, nowPlaying?.repeat ?? "none", !(nowPlaying?.shuffle ?? false)), "Couldn't change shuffle");
 
-  const toggleCrossfade = async () => {
-    if (!selectedGroup) return;
-    setNowPlaying(await bridgeApi.setCrossfade(selectedGroup.id, !(nowPlaying?.crossfade ?? false)));
-  };
+  const toggleCrossfade = () =>
+    changePlayback((groupId) => bridgeApi.setCrossfade(groupId, !(nowPlaying?.crossfade ?? false)), "Couldn't change crossfade");
 
-  const setSleep = async (seconds: number) => {
-    if (!selectedGroup) return;
-    setNowPlaying(await bridgeApi.setSleepTimer(selectedGroup.id, seconds));
-  };
+  const setSleep = (seconds: number) =>
+    changePlayback((groupId) => bridgeApi.setSleepTimer(groupId, seconds), "Couldn't set the sleep timer");
 
   const saveQueueAsPlaylist = async () => {
     if (!selectedGroup) return;
@@ -562,9 +613,9 @@ export function App() {
     try {
       const result = await bridgeApi.savePlaylistFromQueue(name, selectedGroup.id);
       const skip = result.skipped > 0 ? ` (${result.skipped} not from a known source, skipped)` : "";
-      setMessage(`Saved ${result.saved} ${result.saved === 1 ? "track" : "tracks"} to “${result.playlist.name}”${skip}.`);
+      notify(`Saved ${result.saved} ${result.saved === 1 ? "track" : "tracks"} to “${result.playlist.name}”${skip}.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save queue");
+      notifyError(error, "Couldn't save the queue");
     }
   };
 
@@ -575,27 +626,39 @@ export function App() {
     try {
       setQueue(await bridgeApi.clearQueue(selectedGroup.id));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not clear the queue");
+      notifyError(error, "Couldn't clear the queue");
     }
   };
 
   const setZoneVolume = async (zoneId: string, volume: number) => {
     const previous = zoneVolumes[zoneId]?.volume;
     if (!(await confirmVolumeJump(previous, volume))) return;
-    const next = await bridgeApi.volume(zoneId, { volume });
-    setZoneVolumes((current) => ({ ...current, [next.id]: next }));
+    try {
+      const next = await bridgeApi.volume(zoneId, { volume });
+      setZoneVolumes((current) => ({ ...current, [next.id]: next }));
+    } catch (error) {
+      notifyError(error, VOLUME_FAILED);
+    }
   };
 
   const toggleZoneMute = async (zoneId: string) => {
     const current = zoneVolumes[zoneId];
-    const next = await bridgeApi.volume(zoneId, { muted: !current?.muted });
-    setZoneVolumes((existing) => ({ ...existing, [next.id]: next }));
+    try {
+      const next = await bridgeApi.volume(zoneId, { muted: !current?.muted });
+      setZoneVolumes((existing) => ({ ...existing, [next.id]: next }));
+    } catch (error) {
+      notifyError(error, current?.muted ? "Couldn't unmute" : "Couldn't mute");
+    }
   };
 
   const setSelectedGroupVolume = async (volume: number) => {
     if (!selectedGroup) return;
     if (!(await confirmVolumeJump(groupVolume?.volume, volume))) return;
-    setGroupVolume(await bridgeApi.setGroupVolume(selectedGroup.id, { volume }));
+    try {
+      setGroupVolume(await bridgeApi.setGroupVolume(selectedGroup.id, { volume }));
+    } catch (error) {
+      notifyError(error, VOLUME_FAILED);
+    }
     void loadVolumes(selectedGroup);
   };
 
@@ -603,15 +666,23 @@ export function App() {
   // the ceiling takes effect immediately (and the sliders aren't stuck above their max).
   const enforceVolumeCap = useCallback(async (cap: number) => {
     const overZones = Object.values(zoneVolumes).filter((entry) => entry.volume > cap);
-    await Promise.all(overZones.map(async (entry) => {
-      const next = await bridgeApi.volume(entry.id, { volume: cap });
-      setZoneVolumes((current) => ({ ...current, [next.id]: next }));
-    }));
+    const lowered = await Promise.all(overZones.map((entry) => bridgeApi.volume(entry.id, { volume: cap }).catch(() => null)));
+    setZoneVolumes((current) => {
+      const next = { ...current };
+      for (const volume of lowered) if (volume) next[volume.id] = volume;
+      return next;
+    });
+    let failed = lowered.includes(null);
     if (selectedGroup && groupVolume && groupVolume.volume > cap) {
-      setGroupVolume(await bridgeApi.setGroupVolume(selectedGroup.id, { volume: cap }));
+      try {
+        setGroupVolume(await bridgeApi.setGroupVolume(selectedGroup.id, { volume: cap }));
+      } catch {
+        failed = true;
+      }
       void loadVolumes(selectedGroup);
     }
-  }, [zoneVolumes, selectedGroup, groupVolume, loadVolumes]);
+    if (failed) notify("Couldn't turn every room down to the new limit", false);
+  }, [zoneVolumes, selectedGroup, groupVolume, loadVolumes, notify]);
 
   // The group volume is the rooms' average, and moving it scales each room, so rooms
   // set to different levels stay apart. This sets every room to the group volume.
@@ -636,7 +707,11 @@ export function App() {
 
   const toggleGroupMute = async () => {
     if (!selectedGroup || !groupVolume) return;
-    setGroupVolume(await bridgeApi.setGroupVolume(selectedGroup.id, { muted: !groupVolume.muted }));
+    try {
+      setGroupVolume(await bridgeApi.setGroupVolume(selectedGroup.id, { muted: !groupVolume.muted }));
+    } catch (error) {
+      notifyError(error, groupVolume.muted ? "Couldn't unmute" : "Couldn't mute");
+    }
     void loadVolumes(selectedGroup);
   };
 
@@ -661,16 +736,27 @@ export function App() {
   const playQueueItem = async (index: number) => {
     if (!selectedGroup) return;
     try {
-      setNowPlaying(await bridgeApi.playQueueIndex(selectedGroup.id, index));
+      showNowPlaying(await bridgeApi.playQueueIndex(selectedGroup.id, index));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not play from that track");
+      notifyError(error, "Couldn't play from that song");
     }
     void loadNowPlaying(selectedGroup.id);
   };
 
+  // A queue an edit answered with, while it's still the shown room's.
+  const showQueue = (groupId: string, next: QueueItem[]) => {
+    if (shownGroupIdRef.current === groupId) setQueue(next);
+  };
+
   const removeQueueItem = async (index: number) => {
     if (!selectedGroup) return;
-    setQueue(await bridgeApi.removeQueueTrack(selectedGroup.id, index));
+    const groupId = selectedGroup.id;
+    try {
+      showQueue(groupId, await bridgeApi.removeQueueTrack(groupId, index));
+    } catch (error) {
+      notifyError(error, "Couldn't remove the song from the queue");
+      void loadQueue(groupId, true);
+    }
   };
 
   const reorderQueueItem = async (from: number, to: number) => {
@@ -683,11 +769,12 @@ export function App() {
       next.splice(to, 0, moved);
       return next;
     });
+    const groupId = selectedGroup.id;
     try {
-      setQueue(await bridgeApi.reorderQueueTrack(selectedGroup.id, from, to));
+      showQueue(groupId, await bridgeApi.reorderQueueTrack(groupId, from, to));
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not reorder the queue");
-      void loadQueue(selectedGroup.id);
+      notifyError(err, "Couldn't move the song");
+      void loadQueue(groupId);
     }
   };
 
@@ -708,9 +795,9 @@ export function App() {
     if (!input) return;
     try {
       const nowFavorited = await favorites.toggle(input);
-      setMessage(nowFavorited ? `Favorited “${item.title}”.` : `Removed “${item.title}” from favorites.`);
+      notify(nowFavorited ? `Favorited “${item.title}”.` : `Removed “${item.title}” from favorites.`);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not update favorite");
+      notifyError(err, "Couldn't change the favorite");
     }
   };
 
@@ -719,9 +806,9 @@ export function App() {
     if (!input) return;
     try {
       const nowPreset = await favorites.togglePreset(input);
-      setMessage(nowPreset ? `Added “${item.title}” to presets.` : `Removed “${item.title}” from presets.`);
+      notify(nowPreset ? `Added “${item.title}” to presets.` : `Removed “${item.title}” from presets.`);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not update preset");
+      notifyError(err, "Couldn't change the preset");
     }
   };
 
@@ -729,13 +816,13 @@ export function App() {
   // Inherit the prior transport state — switching from a playing station keeps
   // playing; from a paused/stopped one it loads without auto-starting.
   const playPreset = async (preset: Favorite) => {
-    if (!selectedGroup) { setMessage("Pick a room first."); return; }
+    if (!selectedGroup) { notify("Pick a room first.", false); return; }
     try {
       const next = await bridgeApi.playSourceItems(preset.sourceId, { trackIds: [preset.itemId], groupId: selectedGroup.id, mode: "replace", autoplay: effectivePlaying });
-      setNowPlaying(next);
-      setMessage(effectivePlaying ? `Tuned in “${preset.title}”.` : `Loaded “${preset.title}”.`);
+      showNowPlaying(next);
+      notify(effectivePlaying ? `Tuned in “${preset.title}”.` : `Loaded “${preset.title}”.`);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not tune in");
+      notifyError(err, `Couldn't tune in “${preset.title}”`);
     }
   };
 
@@ -770,15 +857,14 @@ export function App() {
         : await bridgeApi.makeZoneStandalone(next.zoneId);
       applySnapshot(snapshot);
       if (next.type === "join") setSelectedGroupId(next.groupId);
-      setMessage(next.type === "join" ? "Group updated" : "Room split into its own group");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not update group");
+      notifyError(error, next.type === "join" ? "Couldn't add the room to the group" : "Couldn't take the room out of its group");
     } finally {
       setPendingGroupEdits((current) => current.filter((edit) => edit.id !== next.id));
       groupEditProcessingRef.current = false;
       void processGroupEditQueue();
     }
-  }, [applySnapshot]);
+  }, [applySnapshot, notifyError]);
 
   const enqueueGroupEdit = useCallback((edit: PendingGroupEdit) => {
     groupEditQueueRef.current.push(edit);
@@ -811,9 +897,9 @@ export function App() {
     setLocalPref(HISTORY_COLLAPSED_PREF, !historyCollapsed);
   };
   const onPlaylistPlayed = useCallback((next: NowPlaying) => {
-    setNowPlaying(next);
+    showNowPlaying(next);
     void loadQueue(next.groupId, true);
-  }, [loadQueue]);
+  }, [loadQueue, showNowPlaying]);
 
   // ←/→ seek from where the last press aimed while Sonos catches up, so quick presses add up.
   const lastSeekRef = useRef<{ target: number; at: number } | null>(null);
@@ -1371,6 +1457,10 @@ export function App() {
           change={historyChange}
         />
       </section>
+      ) : null}
+      {/* Stays in sight above the mini-player and the tabs while the page scrolls. */}
+      {notice ? (
+        <div className={`app-notice browse-status service-result ${notice.ok ? "ok" : "error"}`} role={notice.ok ? "status" : "alert"}>{notice.text}</div>
       ) : null}
       {miniPlayerShown && effectiveNowPlaying?.title ? (
         <MiniPlayer
