@@ -171,7 +171,7 @@ export function GroupEditor(props: GroupEditorProps) {
           <h2>Group Editor</h2>
         </div>
         <div className="heading-actions">
-          <span>{props.busy ? "Saving" : `${props.groups.length} groups`}</span>
+          <span>{props.busy ? "Saving" : `${props.groups.length} ${props.groups.length === 1 ? "group" : "groups"}`}</span>
         </div>
       </div>
       <div className="group-editor-canvas" ref={canvasRef}>
