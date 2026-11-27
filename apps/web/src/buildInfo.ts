@@ -12,8 +12,8 @@ declare const __MISONOS_BUILD__: BuildInfo;
 
 export const BUILD: BuildInfo = __MISONOS_BUILD__;
 
-/** "18 Nov 2026, 19:20 · 3d51984" */
-export function formatBuild(build: BuildInfo, locale?: string): string {
+/** "18 Nov 2026, 19:20 · 3d51984": day before month and a 24-hour clock, whatever the browser's language. */
+export function formatBuild(build: BuildInfo, locale = "en-GB"): string {
   const date = new Date(build.time);
   const when = Number.isNaN(date.getTime())
     ? build.time
