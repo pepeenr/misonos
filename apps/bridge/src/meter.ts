@@ -31,6 +31,11 @@ interface MeterStream {
 const streams = new Map<string, MeterStream>();
 let ffmpegOk = true;
 
+// How the decoder starts; tests put a stand-in here.
+export const decoder = {
+  spawn: (args: string[]): ChildProcessWithoutNullStreams => spawn("ffmpeg", args)
+};
+
 const keyOf = (sourceId: string, trackId: string) => `${sourceId}\n${trackId}`;
 
 export const meterWindowMs = WINDOW_MS;
@@ -45,7 +50,7 @@ export function meterStream(sourceId: string, trackId: string, bytes: Readable, 
 
   let ff: ChildProcessWithoutNullStreams;
   try {
-    ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", String(CHANNELS), "-ar", String(SAMPLE_RATE), "-f", "f32le", "pipe:1"]);
+    ff = decoder.spawn(["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", String(CHANNELS), "-ar", String(SAMPLE_RATE), "-f", "f32le", "pipe:1"]);
   } catch {
     ffmpegOk = false;
     return;
@@ -56,12 +61,31 @@ export function meterStream(sourceId: string, trackId: string, bytes: Readable, 
 
   ff.on("error", () => { ffmpegOk = false; dropStream(key); });
   ff.stdout.on("data", (chunk: Buffer) => consumePcm(stream, chunk));
+  // Its complaints about the input are of no use here, but a stderr pipe nobody reads
+  // fills up and stalls ffmpeg.
+  ff.stderr.resume();
+
   // Forward the proxied bytes into ffmpeg without applying backpressure to the
-  // speaker's stream (ffmpeg keeps up; if its stdin is gone, just stop feeding).
+  // speaker's stream (ffmpeg keeps up). Feeding stops for good once either side is done.
+  let feeding = true;
   const feed = (chunk: Buffer) => { if (ff.stdin.writable) ff.stdin.write(chunk); };
+  const stopFeeding = () => {
+    if (!feeding) return;
+    feeding = false;
+    bytes.off("data", feed);
+    if (ff.stdin.writable) ff.stdin.end();
+  };
+  // Writing to an ffmpeg that has quit (input it can't read, or evicted below) fails
+  // with EPIPE. Unheard, that error takes down the whole bridge, and with it every
+  // song streaming through it.
+  ff.stdin.on("error", stopFeeding);
+  ff.on("close", stopFeeding);
   bytes.on("data", feed);
-  bytes.on("end", () => { if (ff.stdin.writable) ff.stdin.end(); });
-  bytes.on("error", () => { if (ff.stdin.writable) ff.stdin.end(); });
+  // "close" covers a speaker that hangs up early: the stream ends without "end", and
+  // ffmpeg would otherwise sit waiting for more input.
+  bytes.once("end", stopFeeding);
+  bytes.once("close", stopFeeding);
+  bytes.once("error", stopFeeding);
 }
 
 function consumePcm(stream: MeterStream, chunk: Buffer): void {
