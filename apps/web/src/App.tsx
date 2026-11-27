@@ -1,7 +1,7 @@
 import { AudioLines, Blend, Check, ChevronDown, ChevronUp, Gauge, GripVertical, Heart, Info, ListEnd, ListPlus, LogIn, Minus, Moon, MoreHorizontal, Pause, Pin, Play, Plus, RadioTower, RefreshCw, Repeat, Repeat1, RotateCcw, Search, Settings, Shuffle, SkipBack, SkipForward, Star, Trash2, Upload, Volume2, VolumeX, X } from "lucide-react";
 import { Fragment, lazy, Suspense, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, PlayHistoryChange, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
+import type { BridgeSnapshot, EqPayload, EqPreset, EqPresetValues, EqState, Favorite, NowPlaying, PlaybackState, PlayHistoryChange, QueueItem, RepeatMode, SonosGroup, SonosZone, SourceBrowseItem, SourceDescriptor, TransportAction, VolumeState, YouTubeImportJob, YouTubeImportStatus } from "@misonos/sonos-protocol";
 import { BUILT_IN_EQ_PRESETS } from "@misonos/sonos-protocol";
 import { startAccessSignIn, useAccessSignedOut } from "./accessSession.js";
 import { artSrc, bridgeApi, subscribeBridgeEvents } from "./api.js";
@@ -19,7 +19,7 @@ import { ServiceIcon, SourcePicker, SourceTabs, type SourceVariant } from "./Sou
 import { useSpotifyProfiles } from "./spotifyProfiles.js";
 import { SpotifySettings } from "./SpotifySettings.js";
 import { YouTubeSettings } from "./YouTubeSettings.js";
-import { disabledSourceIds, sourceSectionShown, useSourceSettings, type SourceSettings } from "./sourceSettings.js";
+import { disabledSourceIds, sourceSectionShown, useSourceList, useSourceSettings, type SourceSettings } from "./sourceSettings.js";
 import { describeImport, isYouTubeLink } from "./youtube.js";
 import { useYouTubeLink } from "./useYouTubeLink.js";
 import { useAppUpdate } from "./appUpdate.js";
@@ -134,12 +134,14 @@ export function App() {
   // sourceId → version token for user-uploaded service logos (shared by the source
   // dropdown and the Settings upload widget); the token busts the browser cache.
   const [customIcons, setCustomIcons] = useState<Record<string, string>>({});
-  // Bumped when a source is switched on/off in Settings so the (always-mounted)
-  // browser and the logo list re-fetch /api/sources.
+  // Bumped when a source is switched on/off, or its login changes, so the source
+  // lists below are read again.
   const [sourcesVersion, setSourcesVersion] = useState(0);
   const sourcesChanged = useCallback(() => setSourcesVersion((version) => version + 1), []);
-  // Settings → Music sources: the switches, and which source's own section shows.
-  const sources = useSourceSettings(view === "settings", sourcesVersion, sourcesChanged);
+  // The running, switched-on sources, shared by Music, the playlists grid and Settings.
+  const sourceList = useSourceList(sourcesVersion);
+  // Every source with its switch: Settings → Music sources, and Library's source names.
+  const sources = useSourceSettings(view === "settings" || view === "library", sourcesVersion, sourcesChanged);
   const groupEditQueueRef = useRef<PendingGroupEdit[]>([]);
   const groupEditProcessingRef = useRef(false);
   // Best-known "last selected group" membership key — seeded synchronously from the
@@ -157,7 +159,7 @@ export function App() {
 
   useEffect(() => { void refreshCustomIcons(); }, [refreshCustomIcons]);
 
-  const playlistSources = usePlaylistSources(sourcesVersion);
+  const playlistSources = usePlaylistSources(sourceList.list);
   const playlistSource = pickPlaylistSource(playlistSources, playlistsSourcePref);
 
   const displayGroups = useMemo(() => {
@@ -945,6 +947,8 @@ export function App() {
           selectedGroupId={selectedGroupId || selectedGroup?.id}
           selectedGroupName={selectedGroupOption?.name}
           customIcons={customIcons}
+          sources={sourceList.list}
+          sourcesError={sourceList.error}
           sourcesVersion={sourcesVersion}
           searchSlot={searchSlot}
           onSearch={() => navigate("browse")}
@@ -1015,7 +1019,7 @@ export function App() {
               onChanged={sourcesChanged}
             />
           ) : null}
-          <MusicOrderSettings customIcons={customIcons} sourcesVersion={sourcesVersion} />
+          <MusicOrderSettings customIcons={customIcons} sources={sourceList.list ?? []} />
           {sources.settings !== undefined && (!allZonesS2 || showDevPanels) ? (
             <CustomMusicServices zones={householdZones} disabledSourceIds={disabledSourceIds(sources.settings)} />
           ) : null}
@@ -1052,6 +1056,7 @@ export function App() {
               // The room menu up top picks the room, unless it's on "This device",
               // which the library can't play to: then it needs its own picker.
               showGroupPicker={localMode}
+              sources={sources.settings ?? undefined}
               renderSourcePlaylists={(query) => playlistSource ? (
                 <PlaylistsPanel
                   key={`${playlistSource.source.id}:${playlistSource.folderId}`}
@@ -1433,6 +1438,10 @@ interface SourceBrowserProps {
   /** The picked room's name as the room picker shows it, for "Plays it on …". */
   selectedGroupName?: string;
   customIcons: Record<string, string>;
+  /** The running, switched-on sources; null until known. */
+  sources: SourceDescriptor[] | null;
+  /** Why the sources couldn't be read, if they couldn't. */
+  sourcesError: string;
   sourcesVersion: number;
   /** Where the search box goes: a slot on the main screen, present while it shows. */
   searchSlot: HTMLElement | null;
@@ -1456,8 +1465,7 @@ function BrowseThumb({ src }: { src?: string }) {
   return <img className="browse-thumb" src={artSrc(src)} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
-  const [sources, setSources] = useState<Awaited<ReturnType<typeof bridgeApi.listSources>> | null>(null);
+function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons, sources, sourcesError, sourcesVersion, searchSlot, onSearch, searchFocusRequest, youtubeJob, onYouTubeJob }: SourceBrowserProps) {
   const [chosenSourceId, setChosenSourceId] = useState<string | null>(() => readLocalPref(LAST_SOURCE_PREF));
   // "This device" can't play a source that plays only through the speakers (Spotify):
   // it's greyed out, and Music shows the first source that can play here instead,
@@ -1739,27 +1747,23 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const next = await bridgeApi.listSources();
-        setSources(next);
-        if (next.length === 0) return;
-        if (!sourceInitializedRef.current) {
-          // First load: prefer the shared bridge value (falling back to the local cache),
-          // so a source picked on another device carries over here.
-          sourceInitializedRef.current = true;
-          const preferred = await loadPref(LAST_SOURCE_PREF);
-          const chosen = preferred && next.some((entry) => entry.id === preferred) ? preferred : next[0].id;
-          persistSourceId(chosen);
-          return;
-        }
-        const stillExists = chosenSourceId ? next.some((entry) => entry.id === chosenSourceId) : false;
-        if (!stillExists) persistSourceId(next[0].id);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load sources");
-      }
-    })();
-  }, [chosenSourceId, persistSourceId, sourcesVersion]);
+    if (sourcesError) setError(sourcesError);
+  }, [sourcesError]);
+
+  useEffect(() => {
+    if (!sources || sources.length === 0) return;
+    if (!sourceInitializedRef.current) {
+      // First list: prefer the shared bridge value (falling back to the local cache),
+      // so a source picked on another device carries over here.
+      sourceInitializedRef.current = true;
+      void loadPref(LAST_SOURCE_PREF).then((preferred) => {
+        persistSourceId(preferred && sources.some((entry) => entry.id === preferred) ? preferred : sources[0].id);
+      });
+      return;
+    }
+    // The chosen source was switched off or stopped: show the first one instead.
+    if (!chosenSourceId || !sources.some((entry) => entry.id === chosenSourceId)) persistSourceId(sources[0].id);
+  }, [sources, chosenSourceId, persistSourceId]);
 
   // Another source on screen (picked, or swapped in for "This device"): start it from the top.
   // The search text stays: it's likely meant for the new source.

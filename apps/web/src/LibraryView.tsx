@@ -18,17 +18,20 @@ interface LibraryViewProps {
   showGroupPicker?: boolean;
   /** A music source's playlists (Navidrome's), after MiSonos's own; given the search text. */
   renderSourcePlaylists?: (query: string) => ReactNode;
+  /** Every source, switched-off ones too (their favorites stay), to name favorites by. */
+  sources?: SourceSetting[];
 }
 
 type OpenPlaylist = { playlist: Playlist; items: PlaylistItem[] };
 
-export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupPicker = true, renderSourcePlaylists }: LibraryViewProps) {
+const NO_SOURCES: SourceSetting[] = [];
+
+export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupPicker = true, renderSourcePlaylists, sources = NO_SOURCES }: LibraryViewProps) {
   const dialogs = useDialogs();
   const favs = useFavorites();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [recentQueues, setRecentQueues] = useState<RecentQueue[]>([]);
   const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>([]);
-  const [sources, setSources] = useState<SourceSetting[]>([]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<OpenPlaylist | null>(null);
   const [newName, setNewName] = useState("");
@@ -72,8 +75,6 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { void refreshRecentQueues(); }, [refreshRecentQueues]);
   useEffect(() => { void refreshRecentlyPlayed(); }, [refreshRecentlyPlayed]);
-  // Names for every source, including ones switched off in Settings (their favorites stay).
-  useEffect(() => { void bridgeApi.sourceSettings().then(setSources).catch(() => { /* non-fatal */ }); }, []);
 
   const sourceName = useCallback(
     (sourceId: string) => sources.find((source) => source.id === sourceId)?.name ?? sourceId,

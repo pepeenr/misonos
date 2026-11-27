@@ -84,6 +84,12 @@ npm run dev
 ```
 
 The bridge listens on port `4317` and the web app defaults to `http://127.0.0.1:6173`.
+
+To work on the web app against a MiSonos that's already running (no local bridge or sources), point its dev server there:
+
+```sh
+MISONOS_BRIDGE_URL=http://192.168.1.10:6173 npm run dev:web
+```
 For Sonos event subscriptions, the bridge binds to `0.0.0.0` by default so speakers can reach its callback endpoint.
 
 If multicast discovery is unavailable, set known speakers manually:

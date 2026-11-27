@@ -17,6 +17,11 @@ function gitCommit(): string | undefined {
 }
 const build = { time: new Date().toISOString(), commit: gitCommit() };
 
+// Where the dev server and `vite preview` send /api: the local bridge, or any running
+// MiSonos (MISONOS_BRIDGE_URL=http://192.168.1.10:6173), to work on the web app alone.
+const remoteBridge = process.env.MISONOS_BRIDGE_URL?.trim();
+const apiProxy = { "/api": { target: remoteBridge || "http://127.0.0.1:4317", changeOrigin: Boolean(remoteBridge) } };
+
 // Also written to /build.json, so an open app can see whether the server has a newer build.
 function buildJson(): Plugin {
   return {
@@ -90,15 +95,11 @@ export default defineConfig({
     })
   ],
   server: {
-    proxy: {
-      "/api": "http://127.0.0.1:4317"
-    },
+    proxy: apiProxy,
     allowedHosts: [".ts.net", "localhost", "127.0.0.1"]
   },
   preview: {
-    proxy: {
-      "/api": "http://127.0.0.1:4317"
-    },
+    proxy: apiProxy,
     allowedHosts: [".ts.net", "localhost", "127.0.0.1"]
   },
   test: {

@@ -603,21 +603,6 @@ h2 {
   align-items: flex-start;
 }
 
-.settings-card-code {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 1.4rem;
-  letter-spacing: 2px;
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-}
-
-.settings-card-divider {
-  height: 1px;
-  margin: 4px 0;
-  background: rgba(242, 240, 232, 0.14);
-}
-
 .settings-card-subhead {
   margin: 0;
   font-size: 0.9rem;
@@ -783,7 +768,6 @@ h2 {
   gap: 16px;
 }
 
-.vu-mute,
 .vu-hide {
   display: inline-flex;
   align-items: center;
@@ -797,7 +781,6 @@ h2 {
   cursor: pointer;
 }
 
-.vu-mute:hover,
 .vu-hide:hover { border-color: rgba(242, 240, 232, 0.45); }
 
 .vu-hide { padding: 7px; }
@@ -810,16 +793,6 @@ h2 {
 }
 
 .vu-status.vu-error { color: #e9a59f; }
-
-.vu-start {
-  padding: 12px 26px;
-  border-radius: 8px;
-  border: 1px solid rgba(145, 211, 196, 0.5);
-  background: rgba(145, 211, 196, 0.14);
-  color: #d7f2ea;
-  font-size: 1rem;
-  cursor: pointer;
-}
 
 .vu-nudge {
   display: flex;
@@ -1614,7 +1587,6 @@ h2 {
   cursor: not-allowed;
 }
 
-.sidebar,
 .group-editor-panel,
 .now-playing,
 .main-search,
@@ -1623,12 +1595,6 @@ h2 {
   border: 1px solid rgba(242, 240, 232, 0.12);
   background: rgba(31, 35, 34, 0.86);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.24);
-}
-
-.sidebar {
-  grid-area: sidebar;
-  min-height: calc(100vh - 138px);
-  padding: 14px;
 }
 
 .now-playing {
@@ -2037,12 +2003,6 @@ h2 {
   background: rgba(31, 35, 34, 0.98);
 }
 
-.group-editor-hint {
-  margin: -4px 0 12px;
-  color: #aeb4ad;
-  font-size: 0.9rem;
-}
-
 .group-editor-canvas {
   position: relative;
   width: 100%;
@@ -2309,7 +2269,6 @@ h2 {
   gap: 10px;
 }
 
-.group-list,
 .queue-list {
   display: grid;
   gap: 8px;
@@ -2320,15 +2279,6 @@ h2 {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 4px;
-}
-
-.group-row,
-.group-row {
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  text-align: left;
-  cursor: pointer;
 }
 
 .queue-item {
@@ -2513,16 +2463,6 @@ h2 {
 @keyframes queue-pulse {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
-}
-
-.group-row.active {
-  border-color: rgba(145, 211, 196, 0.7);
-  background: rgba(145, 211, 196, 0.12);
-}
-
-.group-row.pending {
-  cursor: default;
-  opacity: 0.72;
 }
 
 small {
@@ -3072,9 +3012,6 @@ small {
       "queue";
   }
 
-  .sidebar {
-    min-height: unset;
-  }
 }
 
 @media (max-width: 640px) {
