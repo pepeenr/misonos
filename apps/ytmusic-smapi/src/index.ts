@@ -17,7 +17,9 @@ server.listen(config.port, config.host, () => {
 
 const shutdown = (signal: string) => {
   console.log(`[ytmusic-smapi] ${signal} — shutting down`);
+  // Docker starts the new container only once this one is gone: drop open streams now.
   server.close(() => process.exit(0));
+  server.closeAllConnections();
 };
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));

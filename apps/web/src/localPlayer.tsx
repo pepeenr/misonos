@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { QueueItem } from "@misonos/sonos-protocol";
 import { artSrc } from "./api.js";
 import { apiUrl } from "./servers.js";
+import { planResume, type ResumeState } from "./streamRecovery.js";
 
 export interface LocalTrack {
   sourceId: string;
@@ -105,6 +106,9 @@ export function LocalPlayerProvider({ children }: { children: ReactNode }) {
   // Whether we *want* audio playing. play() can still be rejected/deferred on mobile;
   // onCanPlay retries from the active element whenever intent is set but it's paused.
   const intendPlayingRef = useRef(false);
+  // Where the active song had got to, and how often its stream was resumed (streamRecovery.ts).
+  const playedRef = useRef(0);
+  const resumeRef = useRef<ResumeState | null>(null);
   const [queue, setQueue] = useState<LocalTrack[]>([]);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -170,6 +174,7 @@ export function LocalPlayerProvider({ children }: { children: ReactNode }) {
     void toEl.play().catch(() => undefined);
     activeSideRef.current = toSide;
     fromEl?.pause();
+    playedRef.current = 0;
     setIndex(idx);
     setPosition(0);
     setDuration(0);
@@ -217,6 +222,26 @@ export function LocalPlayerProvider({ children }: { children: ReactNode }) {
     if (index + 1 < queue.length) playTrack(index + 1, queue);
     else { intendPlayingRef.current = false; activeAudio()?.pause(); setPlaying(false); }
   }, [index, queue, playTrack, activeAudio]);
+
+  // The active song's stream failed: open it again from where it was, or skip it.
+  const recoverOrSkip = useCallback((el: HTMLAudioElement) => {
+    const track = sideTrackRef.current[activeSideRef.current];
+    const playedSeconds = Math.max(el.currentTime || 0, playedRef.current);
+    const plan = track ? planResume(resumeRef.current, `${track.sourceId}
+${track.trackId}`, playedSeconds, el.error?.code) : null;
+    if (!track || !plan) { next(); return; }
+    resumeRef.current = plan.state;
+    window.setTimeout(() => {
+      // Moved on meanwhile: skipped, paused, or another song.
+      if (el !== activeAudio() || !intendPlayingRef.current || !sameTrack(sideTrackRef.current[activeSideRef.current], track)) return;
+      el.addEventListener("loadedmetadata", () => {
+        el.currentTime = playedSeconds;
+        void el.play().catch(() => undefined);
+      }, { once: true });
+      el.src = streamUrl(track);
+      el.load();
+    }, plan.delayMs);
+  }, [activeAudio, next]);
 
   const prev = useCallback(() => {
     const audio = activeAudio();
@@ -417,10 +442,16 @@ export function LocalPlayerProvider({ children }: { children: ReactNode }) {
           // The active element's stream is ready but its autostart play() was rejected
           // (mobile autoplay policy / backgrounded). Retry — this unsticks transitions.
           onCanPlay={(e) => { if (intendPlayingRef.current && isActive(e.currentTarget) && !isSilent(e.currentTarget) && e.currentTarget.paused) void e.currentTarget.play().catch(() => undefined); }}
-          // A stream that failed to load on the active element would dead-end the
-          // queue; skip past it. Errors on the idle/silent element are ignored.
-          onError={(e) => { if (intendPlayingRef.current && isActive(e.currentTarget) && !isSilent(e.currentTarget)) next(); }}
-          onTimeUpdate={(e) => { if (isActive(e.currentTarget)) setPosition(e.currentTarget.currentTime); }}
+          // A stream that broke off mid-song picks up where it was; one that failed to
+          // load would dead-end the queue, so it's skipped. Errors on the idle/silent
+          // element are ignored.
+          onError={(e) => { if (intendPlayingRef.current && isActive(e.currentTarget) && !isSilent(e.currentTarget)) recoverOrSkip(e.currentTarget); }}
+          onTimeUpdate={(e) => {
+            if (!isActive(e.currentTarget)) return;
+            setPosition(e.currentTarget.currentTime);
+            // A reopened stream reports 0 before it's seeked back: keep the real spot.
+            if (!isSilent(e.currentTarget) && e.currentTarget.currentTime > 0) playedRef.current = e.currentTarget.currentTime;
+          }}
           onDurationChange={(e) => { if (isActive(e.currentTarget)) setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0); }}
           onEnded={(e) => { if (isActive(e.currentTarget) && !isSilent(e.currentTarget)) next(); }}
         />

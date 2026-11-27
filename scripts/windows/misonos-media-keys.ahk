@@ -1,8 +1,9 @@
 ; MiSonos media keys, for AutoHotkey v1.1 (AutoHotkey v2 runs it too, through its
 ; v1 launcher). The keyboard's volume knob or keys, mute, and play/pause, next and
-; previous control the Sonos room selected in MiSonos (the last one picked in the
-; app, on any device) instead of this PC. Hold Ctrl with a key to use it for this
-; PC as usual. Setup: README.md next to this script.
+; previous control the Sonos room selected in MiSonos instead of this PC: the one
+; picked on the device with Settings > "Media keys follow this device" on, else the
+; last one picked on any device. Hold Ctrl with a key to use it for this PC as
+; usual. Setup: README.md next to this script.
 #NoEnv
 #SingleInstance Force
 #UseHook

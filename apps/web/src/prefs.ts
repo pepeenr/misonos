@@ -33,6 +33,12 @@ function numberPref(bridgeKey: string, localKey: string): PrefDef<number> {
 
 export const LAST_GROUP_PREF = stringPref("lastGroupKey", "misonos:lastGroupKey");
 export const LAST_SOURCE_PREF = stringPref("lastSourceId", "misonos:lastSourceId");
+// The keyboard's media keys (scripts/windows/misonos-media-keys.ahk) act on the room in
+// lastGroupKey, which every device writes as it picks a room. A device with "Media keys
+// follow this device" on (per device) writes its room here too, and the keys follow that
+// instead; empty when no device has it on.
+export const MEDIA_KEYS_DEVICE_PREF = boolPref("mediaKeysDevice", "misonos:mediaKeysDevice");
+export const MEDIA_KEYS_GROUP_PREF = stringPref("mediaKeysGroupKey", "misonos:mediaKeysGroupKey");
 export const SHOW_DEV_PANELS_PREF = boolPref("showDevPanels", "misonos:showDevPanels");
 // "No chrome" — hide every control (even the close X) on the full-screen cover-art
 // and VU-meter views, so a purist gets the visual undisturbed; a tap dismisses.

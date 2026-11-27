@@ -27,7 +27,7 @@ import { AppVersion } from "./AppVersion.js";
 import { YouTubeLinkPanel } from "./YouTubeLinkPanel.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
-import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, FOLDER_ORDER_PREF, SEARCH_SECTION_ORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
+import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, MEDIA_KEYS_DEVICE_PREF, MEDIA_KEYS_GROUP_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, FOLDER_ORDER_PREF, SEARCH_SECTION_ORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
 import { orderFolders, orderSearchSections, savedOrder, sectionKeyOf, splitSections } from "./musicOrder.js";
 import { shownSourceId, speakerOnlySources } from "./deviceSources.js";
 import { MusicOrderSettings } from "./MusicOrderSettings.js";
@@ -90,6 +90,8 @@ export function App() {
   const [vuOpen, setVuOpen] = useState(false);
   const [noChrome, setNoChrome] = useState<boolean>(() => readLocalPref(FULLSCREEN_NO_CHROME_PREF) ?? false);
   const [queueDragReorder, setQueueDragReorder] = useState<boolean>(() => readLocalPref(QUEUE_DRAG_REORDER_PREF) ?? false);
+  // Per device: the keyboard's media keys follow the room picked here.
+  const [mediaKeysHere, setMediaKeysHere] = useState<boolean>(() => readLocalPref(MEDIA_KEYS_DEVICE_PREF) ?? false);
   const [message, setMessage] = useState("Ready");
   const accessSignedOut = useAccessSignedOut();
   const [searchSlot, setSearchSlot] = useState<HTMLDivElement | null>(null);
@@ -278,7 +280,8 @@ export function App() {
     const key = membershipKey(group);
     storedGroupKeyRef.current = key;
     setPref(LAST_GROUP_PREF, key);
-  }, [selectedGroupId, groups]);
+    if (mediaKeysHere) setPref(MEDIA_KEYS_GROUP_PREF, key);
+  }, [selectedGroupId, groups, mediaKeysHere]);
 
   // Hydrate cross-device preferences from the shared bridge store once on mount.
   useEffect(() => {
@@ -983,6 +986,14 @@ export function App() {
             onQueueDragReorderChange={(value) => {
               setQueueDragReorder(value);
               setPref(QUEUE_DRAG_REORDER_PREF, value);
+            }}
+            mediaKeysHere={mediaKeysHere}
+            onMediaKeysHereChange={(value) => {
+              setMediaKeysHere(value);
+              setLocalPref(MEDIA_KEYS_DEVICE_PREF, value);
+              // On, the room effect writes this device's room; off, the keys go back to
+              // following the last room picked on any device.
+              if (!value) setPref(MEDIA_KEYS_GROUP_PREF, "");
             }}
             maxVolume={maxVolume}
             onMaxVolumeChange={(value) => {
@@ -3053,6 +3064,8 @@ interface PreferencesProps {
   onNoChromeChange: (value: boolean) => void;
   queueDragReorder: boolean;
   onQueueDragReorderChange: (value: boolean) => void;
+  mediaKeysHere: boolean;
+  onMediaKeysHereChange: (value: boolean) => void;
   maxVolume: number;
   onMaxVolumeChange: (value: number) => void;
   onMaxVolumeCommit: (value: number) => void;
@@ -3064,7 +3077,7 @@ interface PreferencesProps {
   onShowShortcuts: () => void;
 }
 
-function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChromeChange, queueDragReorder, onQueueDragReorderChange, maxVolume, onMaxVolumeChange, onMaxVolumeCommit, playlistSources, playlistsSource, onPlaylistsSourceChange, onShowShortcuts }: PreferencesProps) {
+function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChromeChange, queueDragReorder, onQueueDragReorderChange, mediaKeysHere, onMediaKeysHereChange, maxVolume, onMaxVolumeChange, onMaxVolumeCommit, playlistSources, playlistsSource, onPlaylistsSourceChange, onShowShortcuts }: PreferencesProps) {
   // Keep a picked source listed while it's away (signed out, switched off).
   const playlistsSourceMissing = playlistsSource !== "off" && !!playlistSources && !playlistSources.some((entry) => entry.source.id === playlistsSource);
   return (
@@ -3148,6 +3161,18 @@ function Preferences({ showDevPanels, onShowDevPanelsChange, noChrome, onNoChrom
         </span>
         <button type="button" className="pref-button" onClick={onShowShortcuts}>Show</button>
       </div>
+      <label className="pref-row">
+        <span className="pref-label">
+          <strong>Media keys follow this device</strong>
+          <small>The keyboard&rsquo;s media keys (the Windows media-key script) control the room picked on this device. Off, they control the room picked last on any device.</small>
+        </span>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={mediaKeysHere}
+          onChange={(event) => onMediaKeysHereChange(event.target.checked)}
+        />
+      </label>
     </SettingsSection>
   );
 }
