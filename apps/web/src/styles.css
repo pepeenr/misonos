@@ -1529,6 +1529,12 @@ h2 {
   background: #3a2422;
 }
 
+/* The same for actions anywhere else (play, volume, the queue), in the 960px column. */
+.app-shell > .app-notice {
+  max-width: 960px;
+  margin: 16px auto 0;
+}
+
 @media (min-width: 641px) {
   .app-shell.with-mini-player .browse-status {
     bottom: 104px;
