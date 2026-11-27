@@ -28,15 +28,15 @@ import { YouTubeLinkPanel } from "./YouTubeLinkPanel.js";
 import { buildGroupOptions, type GroupOption } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
 import { FULLSCREEN_NO_CHROME_PREF, HISTORY_COLLAPSED_PREF, LAST_GROUP_PREF, LAST_SOURCE_PREF, MAX_VOLUME_PREF, PLAYLISTS_COLLAPSED_PREF, PLAYLISTS_SOURCE_PREF, QUEUE_COLLAPSED_PREF, QUEUE_DRAG_REORDER_PREF, FOLDER_ORDER_PREF, SEARCH_SECTION_ORDER_PREF, SHOW_DEV_PANELS_PREF, loadPref, readLocalPref, setLocalPref, setPref } from "./prefs.js";
-import { orderFolders, orderSearchSections, savedOrder } from "./musicOrder.js";
+import { orderFolders, orderSearchSections, savedOrder, sectionKeyOf, splitSections } from "./musicOrder.js";
 import { shownSourceId, speakerOnlySources } from "./deviceSources.js";
 import { MusicOrderSettings } from "./MusicOrderSettings.js";
 import { forgetPlaylists, pickPlaylistSource, usePlaylistSources, type PlaylistSource } from "./playlists.js";
-import { CollapsibleHeading } from "./CollapsibleHeading.js";
+import { CollapsibleCard, CollapsibleHeading } from "./CollapsibleHeading.js";
 import { SettingsSection } from "./SettingsSection.js";
 import { PlaylistsPanel } from "./PlaylistsPanel.js";
 import { BrowseFolder } from "./BrowseFolder.js";
-import { readOpenFolders, saveOpenFolders } from "./musicFolders.js";
+import { readFoldedSections, readOpenFolders, saveFoldedSections, saveOpenFolders, toggleEntry } from "./musicFolders.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { NowPlayingActions } from "./NowPlayingActions.js";
 import { useKeyboardShortcuts } from "./shortcuts.js";
@@ -1536,12 +1536,21 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   const openHere = openFolders[rootKey] ?? [];
   const toggleFolder = useCallback((id: string) => {
     setOpenFolders((current) => {
-      const list = current[rootKey] ?? [];
-      const next = { ...current, [rootKey]: list.includes(id) ? list.filter((open) => open !== id) : [...list, id] };
+      const next = toggleEntry(current, rootKey, id);
       saveOpenFolders(next);
       return next;
     });
   }, [rootKey]);
+  // A list's sections (a search's Songs and Albums, YouTube Music's shelves) fold too, like
+  // Library's. Which ones are folded is kept per list: the browse key it's shown under.
+  const [foldedSections, setFoldedSections] = useState<Record<string, string[]>>(readFoldedSections);
+  const toggleSection = useCallback((list: string, section: SourceBrowseItem) => {
+    setFoldedSections((current) => {
+      const next = toggleEntry(current, list, sectionKeyOf(section));
+      saveFoldedSections(next);
+      return next;
+    });
+  }, []);
   const loadFolder = useCallback(async (id: string, fresh: boolean) => {
     const key = browseKey(id);
     const cached = browseCache.current.get(key);
@@ -1777,6 +1786,13 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
     setData(null);
   }, [sourceId]);
 
+  // Music scrolls with the page, like Library: another list (a step in or back, a search)
+  // starts at the top. A screen change scrolls up on its own (viewHistory); while Music is
+  // hidden (a source picked in the main screen's search card), the page stays put.
+  useLayoutEffect(() => {
+    if (active && window.scrollY > 0) window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [stack, searchActive, active]);
+
   // Another login is another library: start it from the top.
   const shownProfileRef = useRef(browseProfile);
   useEffect(() => {
@@ -2008,13 +2024,6 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
     // Sources (notably YouTube Music) can repeat an id across shelves, so the
     // list index is part of the key — duplicate keys make React keep stale rows.
     const itemKey = `${item.id}-${index}`;
-    if (item.kind === "section") {
-      return (
-        <li key={itemKey} className="browse-section">
-          {item.title}
-        </li>
-      );
-    }
     if (item.kind === "container") {
       // A followable podcast show (id "show:…") always shows a thumb row with a
       // follow toggle — even without art — so it can be (un)followed from any
@@ -2112,6 +2121,95 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
     );
   };
 
+  const renderRows = (items: SourceBrowseItem[], folder?: SourceBrowseItem) => (
+    <ol className="browse-list">{items.map((item, index) => renderItem(item, index, folder))}</ol>
+  );
+  // A list's rows under its "Play all" bar.
+  const renderBlock = (items: SourceBrowseItem[], folder?: SourceBrowseItem) => (
+    <div className="browse-block">
+      {renderBulk(items)}
+      {renderRows(items, folder)}
+    </div>
+  );
+  const isFolded = (list: string, section: SourceBrowseItem) => foldedSections[list]?.includes(sectionKeyOf(section)) ?? false;
+
+  // An open top-level folder's items, in its card; its sections (YouTube Music's shelves) fold as rows.
+  const renderFolderItems = (items: SourceBrowseItem[], folder: SourceBrowseItem): ReactNode => {
+    const { head, sections } = splitSections(items);
+    if (sections.length === 0) return renderBlock(items, folder);
+    const list = browseKey(folder.id);
+    return (
+      <div className="browse-block">
+        {head.length > 0 ? renderBlock(head, folder) : null}
+        {sections.map(({ section, items: rows }, index) => {
+          const folded = isFolded(list, section);
+          return (
+            <div className="browse-block" key={`${section.id}-${index}`}>
+              <CollapsibleHeading row title={section.title} what={section.title} collapsed={folded} onToggle={() => toggleSection(list, section)}>
+                <span>{rows.length}</span>
+              </CollapsibleHeading>
+              {folded ? null : rows.length === 0 ? <div className="empty-panel">No items.</div> : renderBlock(rows, folder)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // The list on screen as cards, like Library's sections: each top-level folder, and each
+  // section of a list (a search's Songs, Albums…), is a card of its own that folds. Rows
+  // outside them (an album's songs) share a plain card.
+  const shownList = searchActive ? browseKey("?search") : browseKey(stack[stack.length - 1]?.id);
+  const shownName = searchActive ? "Search results" : stack[stack.length - 1]?.title ?? activeSource?.name ?? "Music";
+  const renderCards = (): ReactNode => {
+    const message = (content: ReactNode) => <section className="queue-panel" aria-label={shownName}>{content}</section>;
+    if (error) return message(<div className="empty-panel error-panel"><span>{error}</span></div>);
+    if (!data) return loading ? message(<div className="empty-panel">Loading…</div>) : null;
+    if (shownItems.length === 0) return message(<div className="empty-panel">No items.</div>);
+    const { head, sections } = splitSections(shownItems);
+    const cards: ReactNode[] = [];
+    let rows: SourceBrowseItem[] = [];
+    const addRows = () => {
+      if (rows.length > 0) cards.push(<section className="queue-panel" key={`rows-${cards.length}`} aria-label={shownName}>{renderBlock(rows)}</section>);
+      rows = [];
+    };
+    head.forEach((item, index) => {
+      if (!atRoot || !isFolder(item)) {
+        rows.push(item);
+        return;
+      }
+      addRows();
+      cards.push(
+        <BrowseFolder
+          key={`${rootKey}|${item.id}-${index}`}
+          folder={item}
+          open={openHere.includes(item.id)}
+          onToggle={() => toggleFolder(item.id)}
+          cached={browseCache.current.get(browseKey(item.id))}
+          load={loadFolder}
+          renderItems={(items) => renderFolderItems(items, item)}
+        />
+      );
+    });
+    addRows();
+    sections.forEach(({ section, items: sectionRows }, index) => {
+      const folded = isFolded(shownList, section);
+      cards.push(
+        <CollapsibleCard
+          key={`${shownList}|${section.id}-${index}`}
+          title={section.title}
+          what={section.title}
+          count={sectionRows.length}
+          collapsed={folded}
+          onToggle={() => toggleSection(shownList, section)}
+        >
+          {sectionRows.length === 0 ? <div className="empty-panel">No items.</div> : renderBlock(sectionRows)}
+        </CollapsibleCard>
+      );
+    });
+    return cards;
+  };
+
   if (sources && sources.length === 0) {
     return (
       <section className="queue-panel">
@@ -2121,7 +2219,8 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
   }
 
   return (
-    <section className="queue-panel" aria-label="Source browser">
+    <>
+    <section className="queue-panel browse-top" aria-label="Source browser">
 
       <div className="browse-controls">
         <div className="browse-source">
@@ -2240,23 +2339,17 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
         </div>
       ) : null}
 
-      {renderBulk(shownItems)}
-
-      <nav className="browse-crumbs" aria-label="Path" ref={crumbsRef}>
-        {stack.length === 0 ? (
-          <span className="browse-crumb-placeholder" aria-hidden="true" />
-        ) : (
+      {stack.length > 0 ? (
+        <nav className="browse-crumbs" aria-label="Path" ref={crumbsRef}>
           <button type="button" className="browse-crumb-reset" aria-label="Return to root" onClick={() => pop(0)}>
             <X size={14} />
           </button>
-        )}
-        {stack.map((crumb, index) => (
-          <span className="browse-crumb-item" key={`${crumb.id}-${index}`}>
-            <span className="browse-crumb-sep" aria-hidden="true">/</span>
-            <button type="button" onClick={() => pop(index + 1)}>{crumb.title}</button>
-          </span>
-        ))}
-        {stack.length > 0 ? (
+          {stack.map((crumb, index) => (
+            <span className="browse-crumb-item" key={`${crumb.id}-${index}`}>
+              <span className="browse-crumb-sep" aria-hidden="true">/</span>
+              <button type="button" onClick={() => pop(index + 1)}>{crumb.title}</button>
+            </span>
+          ))}
           <button
             type="button"
             className="browse-crumb-refresh"
@@ -2271,88 +2364,58 @@ function SourceBrowser({ active, selectedGroupId, selectedGroupName, customIcons
           >
             <RefreshCw size={14} className={loading ? "spin" : undefined} />
           </button>
-        ) : null}
-      </nav>
-
-      {error ? (
-        <div className="empty-panel error-panel"><span>{error}</span></div>
-      ) : loading && !data ? (
-        <div className="empty-panel">Loading…</div>
-      ) : data ? (
-        shownItems.length === 0 ? (
-          <div className="empty-panel">No items.</div>
-        ) : (
-          <ol className="browse-list">
-            {shownItems.map((item, index) => {
-              if (atRoot && isFolder(item)) {
-                return (
-                  <BrowseFolder
-                    key={`${rootKey}|${item.id}-${index}`}
-                    folder={item}
-                    open={openHere.includes(item.id)}
-                    onToggle={() => toggleFolder(item.id)}
-                    cached={browseCache.current.get(browseKey(item.id))}
-                    load={loadFolder}
-                    renderItems={(items) => (
-                      <>
-                        {renderBulk(items)}
-                        <ol className="browse-list nested">{items.map((child, childIndex) => renderItem(child, childIndex, item))}</ol>
-                      </>
-                    )}
-                  />
-                );
-              }
-              return renderItem(item, index);
-            })}
-          </ol>
-        )
-      ) : null}
-
-      {status ? (
-        <div className={status.ok ? "service-result ok" : "service-result error"}>{status.message}</div>
-      ) : null}
-
-      {menu ? (
-        <>
-          <div className="action-menu-backdrop" onClick={() => setMenu(null)} onContextMenu={(event) => { event.preventDefault(); setMenu(null); }} />
-          <div ref={menuRef} className="action-menu" style={{ left: menuPos?.left ?? menu.x, top: menuPos?.top ?? menu.y }} role="menu">
-            <button type="button" className="action-menu-item" onClick={() => { void enqueueItem(menu.item, "next"); setMenu(null); }}>
-              <ListPlus size={16} /> <span className="action-menu-item-label"><span>Play next</span></span>
-            </button>
-            <button type="button" className="action-menu-item" onClick={() => { void enqueueItem(menu.item, "end"); setMenu(null); }}>
-              <ListEnd size={16} /> <span className="action-menu-item-label"><span>Add to end</span></span>
-            </button>
-            {menu.item.kind === "playable" && !menu.item.isLive ? (
-              <button
-                type="button"
-                className="action-menu-item"
-                title="This song, then songs like it, in place of the queue"
-                disabled={playing !== null}
-                onClick={() => { void startRadio(menu.item); setMenu(null); }}
-              >
-                <RadioTower size={16} /> <span className="action-menu-item-label"><span>Start radio</span></span>
-              </button>
-            ) : null}
-            <button type="button" className="action-menu-item" onClick={() => { void toggleFavorite(menu.item); setMenu(null); }}>
-              <Heart size={16} fill={isFavorited(menu.item) ? "currentColor" : "none"} />
-              <span className="action-menu-item-label"><span>{isFavorited(menu.item) ? "Unfavorite" : "Favorite"}</span></span>
-            </button>
-            <button type="button" className="action-menu-item" onClick={() => { setAddTo(menu.item); setMenu(null); }}>
-              <Plus size={16} /> <span className="action-menu-item-label"><span>Add to playlist</span></span>
-            </button>
-          </div>
-        </>
-      ) : null}
-
-      {addTo && sourceId ? (
-        <AddToPlaylistModal
-          sourceId={sourceId}
-          item={{ id: addTo.id, kind: addTo.kind, title: addTo.title, artist: addTo.artist, album: addTo.album, durationSeconds: addTo.durationSeconds }}
-          onClose={() => setAddTo(null)}
-          onDone={(message) => setStatus({ ok: true, message })}
-        />
+        </nav>
       ) : null}
     </section>
+
+    {renderCards()}
+
+    {/* Stays in sight above the mini-player while the page scrolls. */}
+    {status ? (
+      <div className={`browse-status service-result ${status.ok ? "ok" : "error"}`} role="status">{status.message}</div>
+    ) : null}
+
+    {menu ? (
+      <>
+        <div className="action-menu-backdrop" onClick={() => setMenu(null)} onContextMenu={(event) => { event.preventDefault(); setMenu(null); }} />
+        <div ref={menuRef} className="action-menu" style={{ left: menuPos?.left ?? menu.x, top: menuPos?.top ?? menu.y }} role="menu">
+          <button type="button" className="action-menu-item" onClick={() => { void enqueueItem(menu.item, "next"); setMenu(null); }}>
+            <ListPlus size={16} /> <span className="action-menu-item-label"><span>Play next</span></span>
+          </button>
+          <button type="button" className="action-menu-item" onClick={() => { void enqueueItem(menu.item, "end"); setMenu(null); }}>
+            <ListEnd size={16} /> <span className="action-menu-item-label"><span>Add to end</span></span>
+          </button>
+          {menu.item.kind === "playable" && !menu.item.isLive ? (
+            <button
+              type="button"
+              className="action-menu-item"
+              title="This song, then songs like it, in place of the queue"
+              disabled={playing !== null}
+              onClick={() => { void startRadio(menu.item); setMenu(null); }}
+            >
+              <RadioTower size={16} /> <span className="action-menu-item-label"><span>Start radio</span></span>
+            </button>
+          ) : null}
+          <button type="button" className="action-menu-item" onClick={() => { void toggleFavorite(menu.item); setMenu(null); }}>
+            <Heart size={16} fill={isFavorited(menu.item) ? "currentColor" : "none"} />
+            <span className="action-menu-item-label"><span>{isFavorited(menu.item) ? "Unfavorite" : "Favorite"}</span></span>
+          </button>
+          <button type="button" className="action-menu-item" onClick={() => { setAddTo(menu.item); setMenu(null); }}>
+            <Plus size={16} /> <span className="action-menu-item-label"><span>Add to playlist</span></span>
+          </button>
+        </div>
+      </>
+    ) : null}
+
+    {addTo && sourceId ? (
+      <AddToPlaylistModal
+        sourceId={sourceId}
+        item={{ id: addTo.id, kind: addTo.kind, title: addTo.title, artist: addTo.artist, album: addTo.album, durationSeconds: addTo.durationSeconds }}
+        onClose={() => setAddTo(null)}
+        onDone={(message) => setStatus({ ok: true, message })}
+      />
+    ) : null}
+    </>
   );
 }
 

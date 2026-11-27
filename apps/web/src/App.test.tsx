@@ -168,10 +168,12 @@ describe("App", () => {
     render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
     fireEvent.click(within(await screen.findByRole("navigation", { name: "Screens" })).getByRole("button", { name: /Music/ }));
 
-    const browser = within(await screen.findByRole("region", { name: "Source browser" }));
+    const browser = within(await screen.findByRole("region", { name: "Browse" }));
     const playlists = await browser.findByRole("button", { name: "Playlists" });
     expect(playlists).toHaveAttribute("aria-expanded", "false");
     expect(browser.getByRole("button", { name: "Artists" })).toHaveAttribute("aria-expanded", "false");
+    // Each folder is a card of its own, like Library's sections.
+    expect(playlists.closest("section")).toHaveAttribute("aria-label", "Playlists");
 
     // It opens where it is, with its count on the right, like the cards elsewhere.
     fireEvent.click(playlists);
@@ -191,6 +193,50 @@ describe("App", () => {
     fireEvent.click(path.getByRole("button", { name: "Return to root" }));
     expect(await browser.findByRole("button", { name: "Road Trip" })).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem("misonos.music.openFolders") ?? "{}")).toEqual({ "navidrome:root": ["playlists"] });
+  });
+
+  it("shows a search's sections as cards that fold, and keeps them folded", async () => {
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/api/groups")) return json([{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }]);
+      if (url.endsWith("/api/zones")) return json([{ id: "z1", uuid: "z1", name: "Kitchen", ipAddress: "10.0.0.2", location: "", visible: true }]);
+      if (url.endsWith("/api/sources")) return json([{ id: "navidrome", name: "Navidrome", rootId: "root", capabilities: ["search"] }]);
+      if (url.endsWith("/api/sources/navidrome/browse")) return json({ id: "root", total: 1, items: [{ id: "artists", title: "Artists", kind: "container" }] });
+      if (url.includes("/api/sources/navidrome/search?")) {
+        return json({ id: "search", total: 5, items: [
+          { id: "section:albums", title: "Albums", kind: "section" },
+          { id: "al1", title: "Europe '72", kind: "album", albumArtUri: "/art/al1" },
+          { id: "section:songs", title: "Songs", kind: "section" },
+          { id: "t1", title: "Ripple", kind: "playable" },
+          { id: "t2", title: "Brokedown Palace", kind: "playable" }
+        ] });
+      }
+      if (url.endsWith("/now-playing")) return json({ groupId: "g1", state: "PLAYING", title: "Song", updatedAt: new Date().toISOString() });
+      if (url.endsWith("/queue")) return json([]);
+      if (libraryLists(url)) return json([]);
+      return json({ groups: [{ id: "g1", coordinatorId: "z1", coordinatorName: "Kitchen", zones: [] }], zones: [] });
+    }));
+    render(<DialogProvider><FavoritesProvider><LocalPlayerProvider><App /></LocalPlayerProvider></FavoritesProvider></DialogProvider>);
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "Screens" })).getByRole("button", { name: /Music/ }));
+
+    const browser = within(await screen.findByRole("region", { name: "Browse" }));
+    const box = within(browser.getByRole("region", { name: "Source browser" })).getByRole("searchbox", { name: "Search Navidrome" });
+    fireEvent.change(box, { target: { value: "dead" } });
+    fireEvent.submit(box.closest("form")!);
+
+    // Each section is a card with its count, and the songs keep their "Play all".
+    const songs = within(await browser.findByRole("region", { name: "Songs" }));
+    expect(songs.getByRole("button", { name: "Songs" })).toHaveAttribute("aria-expanded", "true");
+    expect(songs.getByRole("button", { name: "Songs" }).closest(".section-heading")!.querySelector(".heading-actions > span")).toHaveTextContent("2");
+    expect(songs.getByRole("button", { name: /Play all/ })).toBeInTheDocument();
+    expect(within(browser.getByRole("region", { name: "Albums" })).getByText("Europe '72")).toBeInTheDocument();
+
+    // Folding one hides its rows and is kept for the next search.
+    fireEvent.click(songs.getByRole("button", { name: "Songs" }));
+    expect(songs.getByRole("button", { name: "Songs" })).toHaveAttribute("aria-expanded", "false");
+    expect(browser.queryByText("Ripple")).not.toBeInTheDocument();
+    expect(browser.getByText("Europe '72")).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("misonos.music.foldedSections") ?? "{}")).toEqual({ "navidrome:?search": ["songs"] });
   });
 
   it("searches from the main screen and shows the results in Music", async () => {

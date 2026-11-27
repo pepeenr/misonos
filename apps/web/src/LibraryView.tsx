@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { ArrowLeft, ChevronUp, ChevronDown, ListEnd, ListPlus, Play, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import type { Favorite, Playlist, PlaylistItem, PlaybackMode, RecentlyPlayedItem, RecentQueue, SonosGroup, SourceSetting } from "@misonos/sonos-protocol";
 import { artSrc, bridgeApi } from "./api.js";
-import { CollapsibleHeading } from "./CollapsibleHeading.js";
+import { CollapsibleCard } from "./CollapsibleHeading.js";
 import { GroupDropdown } from "./GroupDropdown.js";
 import { buildGroupOptions } from "./groupPalette.js";
 import { useGroupColors } from "./groupColors.js";
@@ -379,7 +379,7 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
     );
   }
 
-  // Each section is a card of its own, like the main screen's queue and history.
+  // Each section is a card of its own (CollapsibleCard), like Music's folders and sections.
   return (
     <>
       <section className="queue-panel library" aria-label="Library">
@@ -396,7 +396,7 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
       </section>
 
       {recentQueues.length > 0 ? (
-        <LibraryCard title="Recent queues" count={recentQueues.length} collapsed={!!collapsed.recentQueues} onToggle={() => toggleSection("recentQueues")}>
+        <CollapsibleCard title="Recent queues" count={recentQueues.length} collapsed={!!collapsed.recentQueues} onToggle={() => toggleSection("recentQueues")}>
           {filteredRecentQueues.length === 0 ? (
             <div className="empty-panel">No recent queues match “{query.trim()}”.</div>
           ) : (
@@ -418,11 +418,11 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
               ))}
             </ul>
           )}
-        </LibraryCard>
+        </CollapsibleCard>
       ) : null}
 
       {recentlyPlayed.length > 0 ? (
-        <LibraryCard title="Recently played" count={recentlyPlayed.length} collapsed={!!collapsed.recentlyPlayed} onToggle={() => toggleSection("recentlyPlayed")}>
+        <CollapsibleCard title="Recently played" count={recentlyPlayed.length} collapsed={!!collapsed.recentlyPlayed} onToggle={() => toggleSection("recentlyPlayed")}>
           <div className="library-playlist-actions">
             <button type="button" title="Play all recently played as a queue" disabled={busy} onClick={() => void playAllRecentlyPlayed("replace")}>
               <Play size={15} /> Play all
@@ -459,10 +459,10 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
               ))}
             </ul>
           )}
-        </LibraryCard>
+        </CollapsibleCard>
       ) : null}
 
-      <LibraryCard title="Favorites" count={favs.favorites.length} collapsed={!!collapsed.favorites} onToggle={() => toggleSection("favorites")}>
+      <CollapsibleCard title="Favorites" count={favs.favorites.length} collapsed={!!collapsed.favorites} onToggle={() => toggleSection("favorites")}>
         {favs.favorites.length === 0 ? (
           <div className="empty-panel">No favorites yet. Tap the ⋯ menu on a track or album to favorite it.</div>
         ) : favoritesByProvider.length === 0 ? (
@@ -501,12 +501,13 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
             </div>
           ))
         )}
-      </LibraryCard>
+      </CollapsibleCard>
 
-      <LibraryCard
+      <CollapsibleCard
         title="Playlists"
-        label={<span className="playlists-source"><img className="service-icon" src="/favicon.png" alt="" aria-hidden="true" />MiSonos</span>}
+        badge={<span className="playlists-source"><img className="service-icon" src="/favicon.png" alt="" aria-hidden="true" />MiSonos</span>}
         what="MiSonos playlists"
+        label="MiSonos playlists"
         count={playlists.length}
         collapsed={!!collapsed.playlists}
         onToggle={() => toggleSection("playlists")}
@@ -545,7 +546,7 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
             ))}
           </ul>
         )}
-      </LibraryCard>
+      </CollapsibleCard>
 
       {renderSourcePlaylists?.(trimmedQuery)}
     </>
@@ -553,30 +554,6 @@ export function LibraryView({ groups, selectedGroupId, onSelectGroup, showGroupP
 }
 
 const LIBRARY_COLLAPSE_KEY = "misonos.library.collapsed";
-
-// A Library section: a card of its own with the main screen's collapsing title
-// (CollapsibleHeading), so its chevron and count look the same here as there.
-function LibraryCard({ title, label, what, count, collapsed, onToggle, children }: {
-  title: string;
-  /** Beside the count: whose section it is, e.g. the MiSonos logo on its playlists. */
-  label?: ReactNode;
-  /** What the toggle's tooltip shows or hides; the title by default. */
-  what?: string;
-  count?: number;
-  collapsed: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <section className="queue-panel library-card" aria-label={what ? what[0].toUpperCase() + what.slice(1) : title}>
-      <CollapsibleHeading title={title} collapsed={collapsed} onToggle={onToggle} what={what ?? title.toLowerCase()}>
-        {label}
-        {typeof count === "number" ? <span>{count}</span> : null}
-      </CollapsibleHeading>
-      {collapsed ? null : children}
-    </section>
-  );
-}
 
 function verb(mode: PlaybackMode): string {
   return mode === "replace" ? "Playing" : mode === "next" ? "Queued next:" : "Queued at end:";
