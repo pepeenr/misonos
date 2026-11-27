@@ -13,11 +13,17 @@ server.listen(config.port, config.host, () => {
   console.log(`[bridge] store: ${config.dbPath}`);
 });
 
+// Docker stops the old container before it starts the new one, so every second spent
+// here is a second the speakers and apps can't reach MiSonos. Don't wait for the open
+// apps' event streams (they never end) or a speaker's song: drop them and go.
+let stopping = false;
 const shutdown = () => {
-  server.close(async () => {
-    await store.close();
-    process.exit(0);
-  });
+  if (stopping) return;
+  stopping = true;
+  server.close();
+  server.closeAllConnections();
+  setTimeout(() => process.exit(0), 2000).unref();
+  void store.close().catch(() => undefined).finally(() => process.exit(0));
 };
 
 process.on("SIGINT", shutdown);
