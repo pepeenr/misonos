@@ -1,31 +1,31 @@
 # Screenshots
 
-Drop PNG screenshots here with these exact filenames so they show up in the
-top-level `README.md`:
+The images the top-level `README.md` shows. The phone shots are 390 × 844 at 2×
+(780 × 1688); the computer shot is 1440 × 900.
 
 | File | View |
 | --- | --- |
-| `now-playing.jpg` | Main screen with a track playing (artwork + transport) |
-| `now-playing-zones.jpg` | Now playing with the zones / group view |
-| `music-browse.jpg` | The Music browser (a source's list of albums/episodes) |
-| `zone-editor.jpg` | The group/zone editor |
-| `eq-editor.jpg` | The EQ editor modal |
-
-You can add more and reference them from the README the same way.
+| `desktop.jpg` | Playing on a computer: the header and the 960px column every screen uses |
+| `playing.jpg` | Playing: artwork, Song radio, progress, transport and modes |
+| `rooms.jpg` | The room menu in the header: groups, This device, Pause all zones, Edit Groups |
+| `queue-history.jpg` | Playing, further down: the queue and the History card |
+| `music.jpg` | Music on YouTube Music: the Home folder open, its first shelf folded |
+| `music-search.jpg` | Music search results on Spotify: Playlists folded, Songs with Play all |
+| `library.jpg` | Library: search, recent queues, recently played |
+| `group-editor.jpg` | The group editor |
+| `equalizer.jpg` | Settings → Equalizer |
+| `music-sources.jpg` | Settings → Music sources |
+| `vu-meter.png` | The full-screen VU meter |
 
 ## How to capture
 
-1. Run the app: `npm run dev` (then open `http://127.0.0.1:6173`) — or `npm start`
-   for the production build.
-2. Navigate to the view you want.
-3. Capture it:
-   - **macOS:** `⌘⇧4` then drag to select a region (or `⌘⇧5` for window/options).
-     Screenshots save to your Desktop by default.
-   - **Windows:** `Win+Shift+S` (Snipping Tool).
-4. Rename the file to one of the names above and move it into this folder
-   (`docs/screenshots/`).
-5. Commit it. GitHub renders the README images from these relative paths.
+1. Run the app (`npm run dev`, then open `http://127.0.0.1:6173`), or point the web dev
+   server at a running MiSonos with `MISONOS_BRIDGE_URL`.
+2. In the browser's device toolbar, pick a 390 × 844 phone at 2× (or 1440 × 900 for
+   `desktop.jpg`) and go to the view.
+3. Capture the viewport (Chrome and Edge: ⋮ in the device toolbar → *Capture
+   screenshot*) and save it here under the name above.
+4. Leave out anything personal before committing: people's names on Spotify logins,
+   account e-mails, server addresses.
 
-Tip: keep images reasonably sized (e.g. ~1000px wide, < ~500 KB each) so the
-README loads quickly. A phone-sized portrait capture also looks good since the
-PWA is designed for mobile.
+Keep images reasonably small (JPEG, well under 500 KB each) so the README loads quickly.

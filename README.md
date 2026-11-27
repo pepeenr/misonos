@@ -1,6 +1,8 @@
 # <img src="docs/rebus/misonos-mark.svg" height="50" align="middle" alt=""> MiSonos UX11
 
-Modern TypeScript Sonos controller targeting fast LAN control.
+A fast Sonos controller for your home network: a phone-first web app (installable as a
+PWA) and a small Node bridge that talks to the speakers directly over the LAN, with
+music sources of its own.
 
 <p align="center">
   <img src="docs/screenshots/HMI-UXGY-300.01.jpg" height="150" align="middle" alt="Misono UX10 chef's knife">
@@ -14,12 +16,74 @@ Modern TypeScript Sonos controller targeting fast LAN control.
 
 ## Screenshots
 
-<!-- Drop PNGs into docs/screenshots/ with these names (see docs/screenshots/README.md). -->
+<p align="center"><img src="docs/screenshots/desktop.jpg" alt="MiSonos on a computer: the Playing screen" width="820"></p>
+
+On a phone (see [docs/screenshots](docs/screenshots/README.md)):
 
 | | | |
 | :---: | :---: | :---: |
-| ![Now playing](docs/screenshots/now-playing.jpg)<br>**Now playing** | ![Zones](docs/screenshots/now-playing-zones.jpg)<br>**Zones** | ![Browse music](docs/screenshots/music-browse.jpg)<br>**Browse music** |
-| ![Zone editor](docs/screenshots/zone-editor.jpg)<br>**Zone editor** | ![EQ editor](docs/screenshots/eq-editor.jpg)<br>**EQ editor** | ![Settings](docs/screenshots/settings.jpg)<br>**Settings** |
+| ![Playing](docs/screenshots/playing.jpg)<br>**Playing** | ![Rooms](docs/screenshots/rooms.jpg)<br>**Rooms** | ![Queue and history](docs/screenshots/queue-history.jpg)<br>**Queue and history** |
+| ![Music](docs/screenshots/music.jpg)<br>**Music** | ![Search](docs/screenshots/music-search.jpg)<br>**Search** | ![Library](docs/screenshots/library.jpg)<br>**Library** |
+| ![Group editor](docs/screenshots/group-editor.jpg)<br>**Group editor** | ![Equalizer](docs/screenshots/equalizer.jpg)<br>**Equalizer** | ![Music sources](docs/screenshots/music-sources.jpg)<br>**Music sources** |
+
+## What it does
+
+Three screens, **Playing**, **Music** and **Library**, sit in a tab bar along the bottom
+of a phone and in the header on a computer. The room menu in the header picks where
+everything plays, and the gear opens Settings.
+
+### Playing
+
+- Artwork, progress, transport, repeat, shuffle, crossfade and a sleep timer.
+- Volume with −/+ steps. For a group, each room's own volume, and **Even out** to set
+  them all to the group's.
+- **Song radio**: the playing song, then songs like it, in place of the queue. It also
+  starts from any song in Music or History.
+- A search box for any source. Paste a YouTube link there to play it right away, or to
+  save it into Navidrome's "YouTube" playlist through [Downtify](https://github.com/henriquesebastiao/downtify).
+- The **queue** folds away, reorders by dragging, and plays from any row. Tracks can be
+  favorited or removed, and the whole queue saved as a playlist.
+- **History**: every song any room played, by day, ready to play again or to start a
+  radio from.
+- Full-screen album art, and the [VU meter](#vu-meter).
+
+### Rooms
+
+The room menu lists each group with its color and its own play/pause button, plus
+**This device** (plays in the browser), **Pause all zones** and the **group editor**,
+where you drag rooms between groups and pick each group's color.
+
+### Music
+
+- One tab per source, and one per Spotify login in your Sonos app.
+- A source's folders (Playlists, Liked Songs, Albums…) are cards that open in place.
+  Search results come in sections (Songs, Artists, Albums, Playlists) that fold, and stay
+  folded next time.
+- Any list has **Play all**, **Play next** and **Add to end**. A song's ⋯ menu adds play
+  next, add to end, start radio, favorite and add to a playlist.
+
+### Library
+
+**Recent queues** (put back a queue that something else replaced), **recently played**,
+**favorites** by source (radio stations can be presets), MiSonos's own **playlists**
+(they resume where you stopped) and a source's playlists as a grid, all searchable and
+each in a card that folds.
+
+### Settings
+
+Equalizer (bass, treble, loudness, Sub level, presets), alarms, About My Sonos System,
+music sources on or off (with logos of your own), Spotify logins, YouTube Music sign-in
+and the Downtify link, the order of folders and search sections in Music, other MiSonos
+servers to switch to, and preferences such as a maximum volume.
+
+### Keyboard
+
+Nearly everything has a key: Space plays or pauses, ↑/↓ change the volume, G picks the
+next room, B, L and `,` open Music, Library and Settings, `/` searches, and `?` lists the
+rest. On Windows, [`scripts/windows/misonos-media-keys.ahk`](scripts/windows/README.md)
+sends the keyboard's volume knob and media keys to the selected room.
+
+When a new version is deployed, open apps offer to reload into it.
 
 ## VU meter
 
