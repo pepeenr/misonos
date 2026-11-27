@@ -1,5 +1,13 @@
 # Serves the built PWA and reverse-proxies the bridge API on a single origin,
 # preserving the same-origin /api/* model the web app expects.
+{
+	# On a deploy the old containers are stopped one by one before the new ones start,
+	# and by default Caddy waits for every open connection to finish. Open apps keep
+	# their event stream (/api/events) open for good, so it sat out the whole stop
+	# timeout (30 s on Coolify), with the music sources already down meanwhile.
+	grace_period 2s
+}
+
 :6173 {
 	encode gzip
 	root * /srv
