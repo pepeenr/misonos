@@ -111,6 +111,13 @@ const RESOLVE_AHEAD = 5;
 // Sonos queues hold at most 1000 tracks, and AddMultipleURIsToQueue takes 16 at a time.
 const QUEUE_MAX = 1000;
 const ADD_MULTIPLE_MAX = 16;
+// ContentDirectory answers at most 100 items per Browse.
+const QUEUE_PAGE = 100;
+// A long queue's listing is read again after this long even when its UpdateID says it
+// hasn't changed, in case a speaker keeps the same UpdateID through an edit.
+const QUEUE_LISTING_TTL_MS = 30_000;
+// Speakers asked for the household's layout before giving up on it (each waits up to 5 s).
+const TOPOLOGY_SEEDS = 3;
 // Favorites and queues rarely change which Spotify accounts they use.
 const SPOTIFY_ACCOUNTS_TTL_MS = 5 * 60 * 1000;
 
@@ -149,6 +156,8 @@ export class SonosService {
   // The Sonos Spotify account picked in Settings ({ sid, sn, token }), if any.
   readSpotifyAccountChoice?: () => Promise<unknown>;
   private spotifyAccountCache: { accounts: SonosSpotifyAccount[]; expires: number } | undefined;
+  // Each coordinator's queue past its first page, as last listed (queueListing).
+  private queueListings = new Map<string, { updateId: string; items: QueueItem[]; at: number }>();
 
   constructor(private readonly config: BridgeConfig = loadConfig()) {}
 
@@ -257,7 +266,9 @@ export class SonosService {
     );
 
     this.zones = new Map(zones.map((zone) => [zone.uuid, zone]));
-    await this.refreshTopology(zones[0]);
+    // Speakers that described themselves answer first; one that couldn't (off the
+    // network, or a manual IP gone stale) has its address as its uuid.
+    await this.refreshTopology([...zones].sort((a, b) => Number(b.uuid !== b.ipAddress) - Number(a.uuid !== a.ipAddress)));
     this.lastDiscovery = Date.now();
   }
 
@@ -367,15 +378,7 @@ export class SonosService {
     const group = await this.requireGroup(groupId);
     const coordinator = await this.requireZone(group.coordinatorId);
     return this.guardSoap(coordinator.uuid, async () => {
-      const response = await callSoap(coordinator.ipAddress, "ContentDirectory", "Browse", {
-        ObjectID: "Q:0",
-        BrowseFlag: "BrowseDirectChildren",
-        Filter: "*",
-        StartingIndex: 0,
-        RequestedCount: 100,
-        SortCriteria: ""
-      });
-      const items = parseDidlItems(response.Result, `http://${coordinator.ipAddress}:1400`);
+      const items = await this.queueListing(coordinator);
       // Cache-only enrichment (no per-item source fetches in a polling path).
       return items.map((item) => {
         const meta = this.smapiTrackFromCache(item.uri);
@@ -391,6 +394,42 @@ export class SonosService {
         };
       });
     });
+  }
+
+  /**
+   * The whole queue as the speaker lists it, up to Sonos's 1000 tracks, 100 per Browse.
+   * The queue's UpdateID changes with every edit, so while it stays the same a long
+   * queue costs the first page alone: open apps poll this every few seconds.
+   */
+  private async queueListing(coordinator: SonosZone): Promise<QueueItem[]> {
+    const baseUrl = `http://${coordinator.ipAddress}:1400`;
+    const browse = (start: number) => callSoap(coordinator.ipAddress, "ContentDirectory", "Browse", {
+      ObjectID: "Q:0",
+      BrowseFlag: "BrowseDirectChildren",
+      Filter: "*",
+      StartingIndex: start,
+      RequestedCount: QUEUE_PAGE,
+      SortCriteria: ""
+    });
+    const first = await browse(0);
+    const items = parseDidlItems(first.Result, baseUrl);
+    const total = Math.min(Number.parseInt(first.TotalMatches ?? "0", 10) || 0, QUEUE_MAX);
+    if (total <= items.length) {
+      this.queueListings.delete(coordinator.uuid);
+      return items;
+    }
+    const updateId = first.UpdateID ?? "";
+    const known = this.queueListings.get(coordinator.uuid);
+    if (known && updateId && known.updateId === updateId && known.items.length === total && Date.now() - known.at < QUEUE_LISTING_TTL_MS) {
+      return known.items;
+    }
+    while (items.length < total) {
+      const page = parseDidlItems((await browse(items.length)).Result, baseUrl);
+      if (page.length === 0) break;
+      items.push(...page);
+    }
+    this.queueListings.set(coordinator.uuid, { updateId, items, at: Date.now() });
+    return items;
   }
 
   async removeQueueTrack(groupId: string, index: number): Promise<QueueItem[]> {
@@ -1542,13 +1581,20 @@ export class SonosService {
     }
   }
 
-  private async refreshTopology(seed?: SonosZone): Promise<void> {
-    if (!seed) {
+  // Every speaker knows the whole household's layout, so ask them in turn until one
+  // answers: one speaker that can't be reached mustn't split every group into its rooms.
+  private async refreshTopology(seeds: SonosZone[]): Promise<void> {
+    if (seeds.length === 0) {
       this.groups = new Map();
       return;
     }
-    try {
-      const response = await callSoap(seed.ipAddress, "ZoneGroupTopology", "GetZoneGroupState");
+    for (const seed of seeds.slice(0, TOPOLOGY_SEEDS)) {
+      let response: Record<string, string>;
+      try {
+        response = await callSoap(seed.ipAddress, "ZoneGroupTopology", "GetZoneGroupState");
+      } catch {
+        continue;
+      }
       const topology = parseZoneGroupState(response.ZoneGroupState);
       if (topology.zones.length === 0 && (response.ZoneGroupState ?? "").trim().length > 0) {
         // A non-empty topology that parses to nothing means we can't read this layout,
@@ -1560,9 +1606,9 @@ export class SonosService {
       }
       this.zones = new Map(topology.zones.map((zone) => [zone.uuid, zone]));
       this.groups = new Map(topology.groups.map((group) => [group.id, group]));
-    } catch {
-      this.groups = soloGroupsFor(this.zones);
+      return;
     }
+    this.groups = soloGroupsFor(this.zones);
   }
 
   async nowPlayingSettled(groupId: string): Promise<NowPlaying> {
