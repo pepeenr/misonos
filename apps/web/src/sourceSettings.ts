@@ -1,14 +1,41 @@
 import { useCallback, useEffect, useState } from "react";
-import type { SourceSetting } from "@misonos/sonos-protocol";
+import type { SourceDescriptor, SourceSetting } from "@misonos/sonos-protocol";
 import { bridgeApi } from "./api.js";
+
+/**
+ * The running, switched-on sources (/api/sources), read once for the whole app (Music,
+ * the playlists grid, Settings → Order in Music) and again whenever `sourcesVersion`
+ * changes. `list` is null until the first answer; it keeps the last list on a failure.
+ */
+export function useSourceList(sourcesVersion: number) {
+  const [list, setList] = useState<SourceDescriptor[] | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    bridgeApi.listSources()
+      .then((next) => {
+        if (cancelled) return;
+        setList(next);
+        setError("");
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load sources");
+      });
+    return () => { cancelled = true; };
+  }, [sourcesVersion]);
+
+  return { list, error };
+}
 
 /** undefined while loading; null when the bridge couldn't list the sources. */
 export type SourceSettings = SourceSetting[] | null | undefined;
 
 /**
- * The music sources and their on/off switches, read once for the whole Settings page
- * so every section that belongs to a source can follow its switch. Read while
- * `active` (Settings is open), and again whenever `sourcesVersion` changes.
+ * Every source the bridge knows, switched on or off, with its switch: for Settings,
+ * where every section that belongs to a source follows its switch, and for Library,
+ * which names a switched-off source's favorites. Read while `active` (one of those
+ * screens is open), and again whenever `sourcesVersion` changes.
  */
 export function useSourceSettings(active: boolean, sourcesVersion: number, onChanged: () => void) {
   const [settings, setSettings] = useState<SourceSettings>(undefined);

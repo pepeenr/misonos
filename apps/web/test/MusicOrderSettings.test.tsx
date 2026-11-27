@@ -16,17 +16,18 @@ const ROOTS: Record<string, ReturnType<typeof folder>[]> = {
   "youtube-music": [folder("home", "Home"), folder("new-releases", "New Releases"), folder("charts", "Charts")]
 };
 
+const SOURCES = [
+  { id: "spotify", name: "Spotify" },
+  { id: "navidrome", name: "Navidrome" },
+  { id: "youtube-music", name: "YouTube Music" }
+];
+
 describe("Settings → Order in Music", () => {
   let saved: Array<[string, unknown]>;
 
   beforeEach(() => {
     window.localStorage.clear();
     saved = [];
-    vi.spyOn(bridgeApi, "listSources").mockResolvedValue([
-      { id: "spotify", name: "Spotify" },
-      { id: "navidrome", name: "Navidrome" },
-      { id: "youtube-music", name: "YouTube Music" }
-    ] as Awaited<ReturnType<typeof bridgeApi.listSources>>);
     vi.spyOn(bridgeApi, "spotifyAccounts").mockResolvedValue({
       accounts: [account(6, "Mia"), account(3, "PK")],
       selected: { sid: 9, sn: 3, token: "t3", origin: "preference" }
@@ -48,7 +49,7 @@ describe("Settings → Order in Music", () => {
   };
 
   it("orders a Spotify login's folders and search sections, each saved for that login", async () => {
-    render(<MusicOrderSettings customIcons={{}} sourcesVersion={0} />);
+    render(<MusicOrderSettings customIcons={{}} sources={SOURCES} />);
     fireEvent.click(await screen.findByRole("button", { name: "Spotify PK" }));
     await screen.findByRole("list", { name: "Spotify PK folders" });
     expect(rows("Spotify PK folders")).toEqual(["1Playlists", "2Liked Songs", "3Albums", "4Artists", "5Recently Played", "6Top Tracks"]);
@@ -69,7 +70,7 @@ describe("Settings → Order in Music", () => {
   });
 
   it("orders any source's folders, and its search sections only when its search has them", async () => {
-    render(<MusicOrderSettings customIcons={{}} sourcesVersion={0} />);
+    render(<MusicOrderSettings customIcons={{}} sources={SOURCES} />);
     fireEvent.click(await screen.findByRole("button", { name: "YouTube Music" }));
     await screen.findByRole("list", { name: "YouTube Music folders" });
     expect(rows("YouTube Music folders")).toEqual(["1Home", "2New Releases", "3Charts"]);

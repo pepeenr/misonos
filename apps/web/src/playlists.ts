@@ -24,8 +24,11 @@ export function findPlaylistsFolder(items: SourceBrowseItem[]): SourceBrowseItem
   return items.find((item) => item.kind === "container" && (/(^|:)playlists$/i.test(item.id) || item.title.trim().toLowerCase() === "playlists"));
 }
 
-/** The running sources that have a Playlists folder, in /api/sources order; null until known. */
-export function usePlaylistSources(sourcesVersion: number): PlaylistSource[] | null {
+/**
+ * Of the running sources (`sources`, from useSourceList), the ones that have a Playlists
+ * folder, in the same order; null until known.
+ */
+export function usePlaylistSources(sources: SourceDescriptor[] | null): PlaylistSource[] | null {
   const [found, setFound] = useState<PlaylistSource[] | null>(null);
   const [authVersion, setAuthVersion] = useState(0);
 
@@ -37,23 +40,18 @@ export function usePlaylistSources(sourcesVersion: number): PlaylistSource[] | n
   }, []);
 
   useEffect(() => {
+    if (!sources) return undefined;
     let cancelled = false;
-    void (async () => {
-      try {
-        const sources = await bridgeApi.listSources();
-        const roots = await Promise.allSettled(sources.map((source) => bridgeApi.browseSource(source.id)));
-        if (cancelled) return;
-        setFound(sources.flatMap((source, index) => {
-          const root = roots[index];
-          const folder = root.status === "fulfilled" ? findPlaylistsFolder(root.value.items) : undefined;
-          return folder ? [{ source, folderId: folder.id }] : [];
-        }));
-      } catch {
-        if (!cancelled) setFound([]);
-      }
-    })();
+    void Promise.allSettled(sources.map((source) => bridgeApi.browseSource(source.id))).then((roots) => {
+      if (cancelled) return;
+      setFound(sources.flatMap((source, index) => {
+        const root = roots[index];
+        const folder = root.status === "fulfilled" ? findPlaylistsFolder(root.value.items) : undefined;
+        return folder ? [{ source, folderId: folder.id }] : [];
+      }));
+    });
     return () => { cancelled = true; };
-  }, [sourcesVersion, authVersion]);
+  }, [sources, authVersion]);
 
   return found;
 }

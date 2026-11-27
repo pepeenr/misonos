@@ -9,8 +9,8 @@ import { useSpotifyProfiles } from "./spotifyProfiles.js";
 
 interface MusicOrderSettingsProps {
   customIcons: Record<string, string>;
-  /** Bumped when sources are turned on or off. */
-  sourcesVersion: number;
+  /** The running, switched-on sources. */
+  sources: { id: string; name: string }[];
 }
 
 type Orders = Record<string, string[]>;
@@ -33,16 +33,7 @@ function useOrders(pref: PrefDef<Orders>) {
 // Settings → Order in Music: per source, and per Spotify login, the order of Music's
 // top-level folders (Playlists, Liked Songs, …) and of a search's sections (Songs,
 // Artists, Albums, Playlists).
-export function MusicOrderSettings({ customIcons, sourcesVersion }: MusicOrderSettingsProps) {
-  const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    bridgeApi.listSources()
-      .then((all) => { if (!cancelled) setSources(all.map(({ id, name }) => ({ id, name }))); })
-      .catch(() => { if (!cancelled) setSources([]); });
-    return () => { cancelled = true; };
-  }, [sourcesVersion]);
-
+export function MusicOrderSettings({ customIcons, sources }: MusicOrderSettingsProps) {
   const [folderOrders, saveFolderOrders] = useOrders(FOLDER_ORDER_PREF);
   const [searchOrders, saveSearchOrders] = useOrders(SEARCH_SECTION_ORDER_PREF);
 
