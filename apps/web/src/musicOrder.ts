@@ -43,25 +43,29 @@ export function sectionsInOrder(sections: SearchSection[], order: string[] | und
   return inSavedOrder(sections, order, (section) => section.key);
 }
 
+/** A list cut at its "section" rows: what comes before the first one, then each section and its items. */
+export interface SplitList {
+  head: SourceBrowseItem[];
+  sections: { section: SourceBrowseItem; items: SourceBrowseItem[] }[];
+}
+
+export function splitSections(items: SourceBrowseItem[]): SplitList {
+  const result: SplitList = { head: [], sections: [] };
+  for (const item of items) {
+    if (item.kind === "section") result.sections.push({ section: item, items: [] });
+    else if (result.sections.length > 0) result.sections[result.sections.length - 1].items.push(item);
+    else result.head.push(item);
+  }
+  return result;
+}
+
 /** Results with their sections moved into `order`; anything before the first section stays on top. */
 export function orderSearchSections(items: SourceBrowseItem[], order: string[] | undefined): SourceBrowseItem[] {
   if (!order?.length) return items;
-  const head: SourceBrowseItem[] = [];
-  const groups: SourceBrowseItem[][] = [];
-  for (const item of items) {
-    if (item.kind === "section") groups.push([item]);
-    else if (groups.length > 0) groups[groups.length - 1].push(item);
-    else head.push(item);
-  }
-  if (groups.length < 2) return items;
-  const rank = (group: SourceBrowseItem[]) => {
-    const index = order.indexOf(sectionKeyOf(group[0]));
-    return index < 0 ? order.length : index;
-  };
-  const sorted = groups
-    .map((group, index) => ({ group, index }))
-    .sort((a, b) => rank(a.group) - rank(b.group) || a.index - b.index);
-  return [...head, ...sorted.flatMap(({ group }) => group)];
+  const { head, sections } = splitSections(items);
+  if (sections.length < 2) return items;
+  const sorted = inSavedOrder(sections, order, ({ section }) => sectionKeyOf(section));
+  return [...head, ...sorted.flatMap(({ section, items: rows }) => [section, ...rows])];
 }
 
 /** Entries in the saved order (by key); ones it doesn't name keep their own order, after it. */

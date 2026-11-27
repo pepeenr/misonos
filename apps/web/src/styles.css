@@ -1280,12 +1280,6 @@ h2 {
   padding-right: 4px;
 }
 
-.browse-crumb-placeholder {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-}
-
 .browse-crumb-reset {
   display: inline-flex;
   align-items: center;
@@ -1420,42 +1414,55 @@ h2 {
   list-style: none;
   padding: 0;
   margin: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 4px;
-  min-height: 0;
 }
 
-.browse-page {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 110px);
-  min-height: 0;
+/* Music scrolls with the page, like Library: the sources and search in a card on top,
+   then a card per folder or section. */
+.browse-top > :last-child {
+  margin-bottom: 0;
 }
 
-.browse-page > .queue-panel {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+/* A list's rows under its "Play all" bar, or a folder's sections. */
+.browse-block {
+  display: grid;
+  gap: 6px;
 }
 
-.browse-page .browse-list {
-  flex: 1 1 auto;
-  max-height: none;
-  min-height: 0;
-  overflow-y: auto;
+.browse-block > .browse-bulk {
+  margin: 0;
 }
 
-.browse-section {
-  list-style: none;
-  padding: 16px 4px 4px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #aeb4ad;
+/* What was played or went wrong stays in sight, over the cards, above the mini-player
+   and the phone's tab bar. */
+.browse-status {
+  position: sticky;
+  bottom: 16px;
+  z-index: 20;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.browse-status.ok {
+  background: #1f3330;
+}
+
+.browse-status.error {
+  background: #3a2422;
+}
+
+@media (min-width: 641px) {
+  .app-shell.with-mini-player .browse-status {
+    bottom: 104px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell.with-tabs .browse-status {
+    bottom: calc(14px + 61px + env(safe-area-inset-bottom));
+  }
+
+  .app-shell.with-tabs.with-mini-player .browse-status {
+    bottom: calc(14px + 61px + 68px + env(safe-area-inset-bottom));
+  }
 }
 
 .browse-drill {
@@ -2229,8 +2236,8 @@ h2 {
   transform: rotate(-90deg);
 }
 
-/* A section inside a card (Music's folders): a row of its own that opens in place,
-   with the card titles' chevron and count. */
+/* A section inside a card (the shelves in an open Music folder): a row of its own that
+   folds in place, with the card titles' chevron and count. */
 .section-heading.toggles.row {
   margin: 0;
   padding: 8px 12px 8px 10px;
@@ -2246,21 +2253,6 @@ h2 {
 .section-heading.row h3 {
   margin: 0;
   font-size: 0.95rem;
-}
-
-.browse-folder {
-  display: grid;
-  gap: 6px;
-}
-
-.browse-folder > .browse-list.nested {
-  overflow: visible;
-  max-height: none;
-  padding-right: 0;
-}
-
-.browse-folder > .browse-bulk {
-  margin: 0;
 }
 
 .heading-leading {
@@ -3616,7 +3608,7 @@ small {
   cursor: default;
 }
 
-/* Library: a card per section (LibraryCard), titled like the main screen's cards. */
+/* Library: a card per section (CollapsibleCard), titled like the main screen's cards. */
 .library-group {
   display: flex;
   align-items: center;

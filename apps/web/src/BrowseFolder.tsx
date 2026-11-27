@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import type { SourceBrowseItem } from "@misonos/sonos-protocol";
-import { CollapsibleHeading } from "./CollapsibleHeading.js";
+import { CollapsibleCard } from "./CollapsibleHeading.js";
 
 interface BrowseResult {
   items: SourceBrowseItem[];
@@ -19,9 +19,9 @@ interface BrowseFolderProps {
   renderItems: (items: SourceBrowseItem[]) => ReactNode;
 }
 
-// One of a source's top-level folders in Music (Playlists, Liked Songs, Albums…). It opens
-// in place, with the same title row as the cards on the other screens, and loads its items
-// the first time it's opened.
+// One of a source's top-level folders in Music (Playlists, Liked Songs, Albums…). It's a card
+// of its own that opens in place, like Library's sections, and loads its items the first
+// time it's opened.
 export function BrowseFolder({ folder, open, onToggle, cached, load, renderItems }: BrowseFolderProps) {
   const [result, setResult] = useState<BrowseResult | undefined>(cached);
   const [loading, setLoading] = useState(false);
@@ -46,23 +46,26 @@ export function BrowseFolder({ folder, open, onToggle, cached, load, renderItems
   const count = result?.items.filter((item) => item.kind !== "section").length;
 
   return (
-    <li className="browse-folder">
-      <CollapsibleHeading row title={folder.title} collapsed={!open} onToggle={onToggle} what={folder.title}>
-        {open ? (
-          <button
-            className="icon-button compact"
-            type="button"
-            title="Refresh"
-            aria-label={`Refresh ${folder.title}`}
-            disabled={loading}
-            onClick={() => fetchItems(true)}
-          >
-            <RefreshCw size={14} className={loading ? "spin" : undefined} />
-          </button>
-        ) : null}
-        {count !== undefined ? <span>{count}</span> : null}
-      </CollapsibleHeading>
-      {!open ? null : error ? (
+    <CollapsibleCard
+      title={folder.title}
+      what={folder.title}
+      collapsed={!open}
+      onToggle={onToggle}
+      count={count}
+      actions={open ? (
+        <button
+          className="icon-button compact"
+          type="button"
+          title="Refresh"
+          aria-label={`Refresh ${folder.title}`}
+          disabled={loading}
+          onClick={() => fetchItems(true)}
+        >
+          <RefreshCw size={14} className={loading ? "spin" : undefined} />
+        </button>
+      ) : null}
+    >
+      {error ? (
         <div className="empty-panel error-panel">
           <span>{error}</span>
           <button type="button" onClick={() => fetchItems(true)}>Retry</button>
@@ -72,6 +75,6 @@ export function BrowseFolder({ folder, open, onToggle, cached, load, renderItems
       ) : result.items.length === 0 ? (
         <div className="empty-panel">No items.</div>
       ) : renderItems(result.items)}
-    </li>
+    </CollapsibleCard>
   );
 }

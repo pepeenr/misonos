@@ -43,3 +43,34 @@ export function CollapsibleHeading({ title, collapsed, onToggle, shortcut, what,
     </div>
   );
 }
+
+interface CollapsibleCardProps {
+  title: string;
+  /** What the toggle's tooltip shows or hides; the title, in lower case, by default. */
+  what?: string;
+  /** The region's name; the title by default. */
+  label?: string;
+  /** Buttons for the title row (a refresh), before the count. */
+  actions?: ReactNode;
+  /** Beside the count: whose section it is, e.g. the MiSonos logo on its playlists. */
+  badge?: ReactNode;
+  count?: number;
+  collapsed: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}
+
+// A section that's a card of its own with a collapsing title: Library's sections, and Music's
+// folders and the sections of its lists, so they look and fold the same on both screens.
+export function CollapsibleCard({ title, what, label, actions, badge, count, collapsed, onToggle, children }: CollapsibleCardProps) {
+  return (
+    <section className="queue-panel collapsible-card" aria-label={label ?? title}>
+      <CollapsibleHeading title={title} collapsed={collapsed} onToggle={onToggle} what={what ?? title.toLowerCase()}>
+        {actions}
+        {badge}
+        {typeof count === "number" ? <span>{count}</span> : null}
+      </CollapsibleHeading>
+      {collapsed ? null : children}
+    </section>
+  );
+}
